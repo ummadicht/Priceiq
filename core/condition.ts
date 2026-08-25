@@ -75,7 +75,24 @@ export function mapCondition(ladder: ProgramLadder, label: string): ConditionSpa
 }
 
 function norm(s: string): string {
-  return (s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  /* PLUS AND MINUS ARE PART OF A GRADE — except when they are punctuation.
+   *
+   * "B-" and "B" are different rungs, and collapsing them filed every B- price
+   * a grade too high. But "good-condition" and "good condition" are the same
+   * label written two ways, and keeping that hyphen broke the match.
+   *
+   * The distinction is positional: a modifier TRAILS its grade ("b-", "a+"),
+   * while punctuation sits BETWEEN two words. So internal hyphens and pluses
+   * become spaces first, and only the trailing ones survive. */
+  return (s || "")
+    .toLowerCase()
+    .replace(/([a-z0-9])[+-]([a-z0-9])/g, "$1 $2")
+    .replace(/[^a-z0-9+-]+/g, " ")
+    .replace(/\s+/g, " ")
+    // A modifier separated from its grade by a stray space ("B -") is still
+    // that grade's modifier. Spreadsheets are typed by people.
+    .replace(/\s+([+-])/g, "$1")
+    .trim();
 }
 
 export type Comparability = "exact" | "approximate" | "incomparable";
@@ -112,9 +129,37 @@ export function comparabilityNote(a: ConditionSpan, b: ConditionSpan): string {
  * definition bugs worth catching when the ladder is written rather than when a
  * customer asks why a number looks wrong.
  */
-export function validateLadder(ladder: ProgramLadder): { ok: boolean; problems: string[] } {
-  const problems: string[] = [];
-  if (!ladder.rungs.length) problems.push("ladder has no rungs");
+export type LadderCheck = {
+  /** False only when something is genuinely broken. */
+  ok: boolean;
+  /** Conditions with NO price. Always a defect. */
+  gaps: string[];
+  /** Conditions priced by more than one rung. See below. */
+  overlaps: string[];
+  /** Duplicate labels — ingest could not tell two rungs apart. Always a defect. */
+  duplicates: string[];
+};
+
+/**
+ * Check a ladder definition.
+ *
+ * A GAP IS ALWAYS A BUG: some real handset condition has no price at all.
+ *
+ * AN OVERLAP USUALLY IS NOT. A programme grading in seven rungs against a
+ * five-rung canonical scale must have adjacent rungs straddling canonical
+ * boundaries — that is finer resolution than the canonical scale can express,
+ * and it is exactly what spans exist to represent. Treating it as an error
+ * would mean either rejecting the most detailed sources or flattening them into
+ * a precision they do not have.
+ *
+ * Overlaps are still REPORTED, because they are why comparisons involving those
+ * rungs come out `approximate` rather than `exact`, and somebody reading a
+ * price table deserves to know which.
+ */
+export function validateLadder(ladder: ProgramLadder): LadderCheck {
+  const gaps: string[] = [];
+  const overlaps: string[] = [];
+  const duplicates: string[] = [];
 
   const seen = new Map<CanonicalCondition, number>();
   for (const r of ladder.rungs) {
@@ -125,11 +170,15 @@ export function validateLadder(ladder: ProgramLadder): { ok: boolean; problems: 
   }
   for (const c of CANONICAL_ORDER) {
     const n = seen.get(c) || 0;
-    if (n === 0) problems.push(`no rung covers "${CONDITION_LABEL[c]}"`);
-    if (n > 1) problems.push(`"${CONDITION_LABEL[c]}" is covered by ${n} rungs`);
+    if (n === 0) gaps.push(`no rung covers "${CONDITION_LABEL[c]}"`);
+    else if (n > 1) overlaps.push(`"${CONDITION_LABEL[c]}" is priced by ${n} rungs`);
   }
-  const labels = ladder.rungs.map((r) => norm(r.label));
-  if (new Set(labels).size !== labels.length) problems.push("duplicate rung labels");
 
-  return { ok: problems.length === 0, problems };
+  const labels = ladder.rungs.map((r) => norm(r.label));
+  const dupes = labels.filter((l, i) => labels.indexOf(l) !== i);
+  for (const d of [...new Set(dupes)]) duplicates.push(`two rungs both read as "${d}"`);
+
+  if (!ladder.rungs.length) gaps.push("ladder has no rungs");
+
+  return { ok: gaps.length === 0 && duplicates.length === 0, gaps, overlaps, duplicates };
 }

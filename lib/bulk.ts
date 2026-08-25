@@ -85,7 +85,7 @@ export function parseBulk(text: string, defaults: BulkDefaults = {}): BulkReport
 
   const catalogue: CanonicalDevice[] = listDevices().map((d) => ({
     id: d.id, brand: d.brand, model: d.model, storageGb: d.storageGb,
-    releaseYear: d.releaseYear, aliases: d.aliases,
+    ramGb: d.ramGb, releaseYear: d.releaseYear, aliases: d.aliases,
   }));
 
   const cell = (r: string[], field: string) => {

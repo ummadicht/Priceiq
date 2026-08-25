@@ -33,6 +33,20 @@ export type CanonicalDevice = {
   /** Marketing model name without storage, e.g. "iPhone 15 Pro Max". */
   model: string;
   storageGb: number;
+  /**
+   * RAM, where it is part of the device's identity. Optional, because for many
+   * handsets it is not — Apple does not market it and does not price on it.
+   *
+   * IT IS NOT OPTIONAL IN INDIA. In a real 2,558-row exchange list, 404 model
+   * and storage combinations shipped in more than one RAM size, and 370 of them
+   * were priced DIFFERENTLY — an Honor 90 256GB is worth 9,029 at 8GB of RAM
+   * and 9,538 at 12GB. Treating those as one device means one device with two
+   * prices, and whichever arrived last would silently win.
+   *
+   * Undefined means "not a distinguishing feature for this device", NOT
+   * "unknown" — see the matching rule in resolveDevice.
+   */
+  ramGb?: number;
   releaseYear: number;
   /** Model numbers and known alternate spellings, e.g. "A2849", "SM-S918B". */
   aliases: string[];
@@ -52,7 +66,12 @@ export type Resolution =
  */
 const NOISE = new Set([
   "unlocked", "refurbished", "refurb", "renewed", "preowned", "pre-owned", "used",
-  "dual", "sim", "dualsim", "nano", "esim", "gsm", "cdma", "factory",
+  /* "dual" is NOT here. It reads as noise in "Dual SIM" but it is part of the
+     model name in "Redmi 8A Dual", and dropping it made those two handsets
+     indistinguishable. Keeping it costs nothing: a canonical model's tokens
+     must all appear in the listing, and extra listing tokens are ignored, so
+     "iPhone 15 Pro Max Dual SIM" still matches "iPhone 15 Pro Max". */
+  "sim", "dualsim", "nano", "esim", "gsm", "cdma", "factory",
   "smartphone", "phone", "mobile", "handset", "device", "with", "and",
   "brand", "new", "condition", "grade", "model", "colour", "color",
 ]);
@@ -78,13 +97,37 @@ const NOISE = new Set([
  */
 const CAPACITIES = new Set([64, 128, 256, 512, 1024, 2048]);
 
+/**
+ * RAM from a "RAM/storage" pair — the FIRST figure of "(8 GB/256 GB)".
+ *
+ * Returns null when the string carries only one capacity, because a lone
+ * "128 GB" is storage. RAM is only ever read from an explicit pair, so it can
+ * never be confused with the storage it sits beside.
+ */
+export function parseRamGb(raw: string): number | null {
+  const s = (raw || "").toLowerCase();
+  const pair = /(\d+)\s*gb\s*[/|]\s*(\d+)\s*(gb|tb)\b/.exec(s);
+  return pair ? parseInt(pair[1], 10) : null;
+}
+
 /** "512gb" / "512 gb" / "1tb" / a bare "512" → gigabytes. */
 export function parseStorageGb(raw: string): number | null {
   const s = (raw || "").toLowerCase();
   const tb = /(\d+(?:\.\d+)?)\s*tb\b/.exec(s);
   if (tb) return Math.round(parseFloat(tb[1]) * 1024);
-  const gb = /(\d+)\s*gb\b/.exec(s);
-  if (gb) return parseInt(gb[1], 10);
+  /* RAM/STORAGE PAIRS. Indian price lists write "(4 GB/128 GB)" — RAM first,
+     storage second — so taking the FIRST "N GB" match reads the RAM. Every row
+     of a real 2,558-line exchange sheet resolved to 4GB, 8GB or 16GB devices
+     that do not exist.
+
+     Prefer a match that is a real storage capacity, and take the LAST such,
+     because storage follows RAM in every listing shape seen. Falls back to the
+     last match at all, so a single unqualified "N GB" still works. */
+  const gbMatches = [...s.matchAll(/(\d+)\s*gb\b/g)].map((m) => parseInt(m[1], 10));
+  if (gbMatches.length) {
+    const capacities = gbMatches.filter((n) => CAPACITIES.has(n));
+    return capacities.length ? capacities[capacities.length - 1] : gbMatches[gbMatches.length - 1];
+  }
 
   // Unit-less fallback, capacity set only, LAST match wins — storage follows
   // the model name, so the trailing number is the candidate.
@@ -105,10 +148,26 @@ export function parseStorageGb(raw: string): number | null {
 export function tokenise(raw: string): string[] {
   return (raw || "")
     .toLowerCase()
+    /* Strip a RAM/storage spec before anything else.
+     *
+     * "Google Pixel 10A (8 GB/256 GB)" otherwise contributes an "8" token from
+     * its RAM, which then satisfies the model tokens of "Pixel 8A" — two
+     * different handsets, matched because of a memory size. Capacity is read
+     * separately by parseStorageGb and parseRamGb; it has no business
+     * competing as a model token. */
+    .replace(/\(?\s*\d+\s*gb\s*[/|]\s*\d+\s*(gb|tb)\s*\)?/g, " ")
     .replace(/[()[\]{},/|]/g, " ")
     .replace(/[–—]/g, "-")
+    /* Network-generation suffixes are ONE token, not a digit and a letter.
+     *
+     * Splitting "5g" into "5" and "g" let the 5 satisfy a model number:
+     * "iQOO Z10 5G" matched "iQOO Z5 5G" because Z5 needed a "5" and the
+     * network suffix supplied one. Forty-one real rows, all the same shape.
+     * The suffix is protected before the letter/digit split, then restored. */
+    .replace(/\b([345])\s*g\b/g, "$1\u0000g")
     .replace(/([a-z])(\d)/g, "$1 $2")
     .replace(/(\d)([a-z])/g, "$1 $2")
+    .replace(/\u0000/g, "")
     .replace(/[^a-z0-9+\-. ]/g, " ")
     .split(/\s+/)
     .filter(Boolean)
@@ -123,13 +182,22 @@ export function tokenise(raw: string): string[] {
 
 function brandOf(tokens: string[]): string | null {
   const first = tokens[0] || "";
+  /* Every brand in the Indian exchange sheet, which is a far longer list than
+     the three-market flagship view suggests: POCO, iQOO, Infinix and Tecno are
+     high-volume there and were absent, so a quarter of a real price list
+     resolved to "no known brand". Keys are lowercase tokens; values are the
+     canonical spelling used in the catalogue. */
   const known: Record<string, string> = {
     apple: "Apple", iphone: "Apple", ipad: "Apple",
     samsung: "Samsung", galaxy: "Samsung",
     google: "Google", pixel: "Google",
-    oneplus: "OnePlus", xiaomi: "Xiaomi", redmi: "Xiaomi", oppo: "OPPO",
-    vivo: "Vivo", realme: "realme", motorola: "Motorola", moto: "Motorola",
-    nothing: "Nothing", sony: "Sony", huawei: "Huawei",
+    oneplus: "OnePlus", xiaomi: "Xiaomi", redmi: "Xiaomi", mi: "Xiaomi",
+    poco: "POCO", iqoo: "iQOO",
+    oppo: "OPPO", vivo: "Vivo", realme: "realme",
+    motorola: "Motorola", moto: "Motorola",
+    nothing: "Nothing", sony: "Sony", huawei: "Huawei", honor: "Honor",
+    nokia: "Nokia", infinix: "Infinix", tecno: "Tecno",
+    asus: "Asus", lenovo: "Lenovo", lg: "LG",
   };
   for (const t of tokens) if (known[t]) return known[t];
   void first;
@@ -212,13 +280,42 @@ export function resolveDevice(listing: string, catalogue: CanonicalDevice[]): Re
     };
   }
 
-  const exact = top.filter((d) => d.storageGb === storage);
+  let exact = top.filter((d) => d.storageGb === storage);
+
+  /* RAM DISCRIMINATES ONLY WHEN BOTH SIDES DECLARE IT.
+   *
+   * A listing that names its RAM must not match a catalogue entry naming a
+   * different one — that is two different products at two different prices.
+   * But a catalogue entry with no RAM recorded is saying "RAM is not part of
+   * this device's identity", not "unknown", so it stays eligible. */
+  const ram = parseRamGb(raw);
+  if (ram === null && exact.length > 1) {
+    /* The listing says nothing about RAM. A RAM-AGNOSTIC entry is the general
+     * device and is the right answer here; falling through to "ambiguous"
+     * across every RAM variant would make an ordinary listing unresolvable
+     * just because the catalogue also holds RAM-specific rows. If there is no
+     * general entry, ambiguity is the honest outcome. */
+    const agnostic = exact.filter((d) => d.ramGb === undefined);
+    if (agnostic.length) exact = agnostic;
+  }
+  if (ram !== null && exact.length > 1) {
+    /* An EXACT RAM match beats a RAM-agnostic entry.
+     *
+     * A catalogue can legitimately hold both "iPhone 15 256GB" (RAM not part of
+     * its identity) and "iPhone 15 8GB/256GB" (enrolled from a source that
+     * prices on RAM). Keeping both as candidates made 184 real rows ambiguous;
+     * the specific entry is plainly the better answer when the listing names
+     * its RAM. */
+    const declared = exact.filter((d) => d.ramGb === ram);
+    if (declared.length) exact = declared;
+    else exact = exact.filter((d) => d.ramGb === undefined);
+  }
   if (exact.length === 1) {
     return {
       status: "matched",
       device: exact[0],
       confidence: fits.length === 1 ? 0.97 : 0.9,
-      why: `matched ${exact[0].model} ${storage}GB on ${fits[0].covered} model tokens`,
+      why: `matched ${exact[0].model} ${storage}GB${exact[0].ramGb ? ` / ${exact[0].ramGb}GB RAM` : ""} on ${fits[0].covered} model tokens`,
     };
   }
   if (exact.length > 1) {

@@ -98,13 +98,15 @@ export function listPrograms(market?: MarketCode): ProgramRow[] {
   });
 }
 
-export type DeviceRow = { id: string; brand: string; model: string; storageGb: number; releaseYear: number; aliases: string[] };
+export type DeviceRow = { id: string; brand: string; model: string; storageGb: number; ramGb?: number; releaseYear: number; aliases: string[] };
 
 export function listDevices(): DeviceRow[] {
   return (db().prepare("SELECT * FROM devices ORDER BY brand, release_year DESC, model, storage_gb").all() as Array<Record<string, unknown>>)
     .map((r) => ({
       id: String(r.id), brand: String(r.brand), model: String(r.model),
-      storageGb: Number(r.storage_gb), releaseYear: Number(r.release_year),
+      storageGb: Number(r.storage_gb),
+      ramGb: r.ram_gb === null || r.ram_gb === undefined ? undefined : Number(r.ram_gb),
+      releaseYear: Number(r.release_year),
       aliases: j<string[]>(String(r.aliases || "[]"), []),
     }));
 }

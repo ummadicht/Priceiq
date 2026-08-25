@@ -55,6 +55,7 @@ function init(): Database.Database {
       brand         TEXT NOT NULL,
       model         TEXT NOT NULL,
       storage_gb    INTEGER NOT NULL,
+      ram_gb        INTEGER,
       release_year  INTEGER NOT NULL,
       aliases       TEXT NOT NULL DEFAULT '[]'
     );
@@ -93,7 +94,6 @@ function init(): Database.Database {
       week           TEXT NOT NULL DEFAULT ''
     );
     CREATE INDEX IF NOT EXISTS idx_mp ON market_prices(device_id, market, channel, observed_at);
-    CREATE INDEX IF NOT EXISTS idx_mp_week ON market_prices(device_id, market, channel, week);
 
     -- Rates are stored per DATE, never "latest", so a historical conversion is
     -- reproducible instead of being re-derived at today's rate.
@@ -187,6 +187,7 @@ function migrate(db: Database.Database) {
     ["market_prices", "entered_by", "ALTER TABLE market_prices ADD COLUMN entered_by TEXT NOT NULL DEFAULT ''"],
     ["market_prices", "week", "ALTER TABLE market_prices ADD COLUMN week TEXT NOT NULL DEFAULT ''"],
     ["programs", "note", "ALTER TABLE programs ADD COLUMN note TEXT NOT NULL DEFAULT ''"],
+    ["devices", "ram_gb", "ALTER TABLE devices ADD COLUMN ram_gb INTEGER"],
   ];
   for (const [table, column, stmt] of need) {
     const cols = new Set(
@@ -194,6 +195,12 @@ function migrate(db: Database.Database) {
     );
     if (!cols.has(column)) db.exec(stmt);
   }
+  /* Indexes on migrated columns belong HERE, after the ALTERs.
+     Putting this in the CREATE block meant it ran before the migration, so on
+     any database created before the column existed the index referenced a
+     missing column and the entire schema exec threw — every page 500ing on a
+     schema change that had otherwise been handled correctly. */
+  db.exec("CREATE INDEX IF NOT EXISTS idx_mp_week ON market_prices(device_id, market, channel, week)");
 }
 
 export function db(): Database.Database {

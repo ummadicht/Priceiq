@@ -43,6 +43,21 @@ t("labels match regardless of case, spacing or punctuation", () => {
     assert.deepEqual(mapCondition(OEM, s), spanOf("flawless", "good"), s);
   }
 });
+t("A TRAILING MODIFIER SURVIVES; AN INTERNAL HYPHEN DOES NOT", () => {
+  // "B-" is a different rung from "B". "good-condition" is the same label as
+  // "good condition". Position is what tells them apart.
+  const l = { programId: "x", rungs: [
+    { label: "B",  span: spanOf("flawless", "good") },
+    { label: "B-", span: spanOf("good") },
+    { label: "Good condition", span: spanOf("fair", "broken") },
+  ]};
+  assert.deepEqual(mapCondition(l, "B-"), spanOf("good"));
+  assert.deepEqual(mapCondition(l, "b -"), spanOf("good"));
+  assert.deepEqual(mapCondition(l, "B"), spanOf("flawless", "good"));
+  assert.deepEqual(mapCondition(l, "good-condition"), spanOf("fair", "broken"));
+  assert.deepEqual(mapCondition(l, "GOOD CONDITION"), spanOf("fair", "broken"));
+});
+
 t("AN UNKNOWN GRADE MAPS TO NOTHING — never to a default", () => {
   // Defaulting an unrecognised grade would attach a fabricated condition to a
   // real price, which is worse than having no price at all.
@@ -86,6 +101,40 @@ t("a complete ladder validates", () => {
   assert.equal(validateLadder(CARRIER).ok, true);
   assert.equal(validateLadder(OEM).ok, true);
 });
+t("PLUS AND MINUS ARE PART OF THE GRADE, not punctuation", () => {
+  // "B-" collapsing onto "B" meant every B- price was filed a grade too high.
+  const seven = { programId: "x", rungs: [
+    { label: "A",  span: spanOf("flawless") },
+    { label: "B",  span: spanOf("flawless", "good") },
+    { label: "B-", span: spanOf("good") },
+    { label: "C",  span: spanOf("good", "fair") },
+    { label: "C-", span: spanOf("fair", "poor") },
+    { label: "D",  span: spanOf("poor") },
+    { label: "E",  span: spanOf("broken") },
+  ]};
+  assert.deepEqual(validateLadder(seven).duplicates, []);
+  assert.deepEqual(mapCondition(seven, "B-"), spanOf("good"));
+  assert.deepEqual(mapCondition(seven, "B"), spanOf("flawless", "good"));
+  assert.notDeepEqual(mapCondition(seven, "B-"), mapCondition(seven, "B"));
+  assert.notDeepEqual(mapCondition(seven, "C-"), mapCondition(seven, "C"));
+});
+t("A FINER LADDER OVERLAPS AND IS STILL VALID", () => {
+  // Seven rungs cannot map onto five canonical without straddling boundaries.
+  // Rejecting that would mean rejecting the most detailed sources.
+  const seven = { programId: "x", rungs: [
+    { label: "A",  span: spanOf("flawless") },
+    { label: "B",  span: spanOf("flawless", "good") },
+    { label: "B-", span: spanOf("good") },
+    { label: "C",  span: spanOf("good", "fair") },
+    { label: "C-", span: spanOf("fair", "poor") },
+    { label: "D",  span: spanOf("poor") },
+    { label: "E",  span: spanOf("broken") },
+  ]};
+  const v = validateLadder(seven);
+  assert.equal(v.ok, true, "a finer ladder must not be rejected");
+  assert.deepEqual(v.gaps, []);
+  assert.ok(v.overlaps.length > 0, "overlaps must still be reported");
+});
 t("A GAP IS REPORTED — some real condition would have no price", () => {
   const gappy = { programId: "x", rungs: [
     { label: "Top", span: spanOf("flawless") },
@@ -93,24 +142,27 @@ t("A GAP IS REPORTED — some real condition would have no price", () => {
   ]};
   const v = validateLadder(gappy);
   assert.equal(v.ok, false);
-  assert.ok(v.problems.some((p) => /Good/.test(p)));
-  assert.ok(v.problems.some((p) => /Fair/.test(p)));
+  assert.ok(v.gaps.some((p) => /Good/.test(p)));
+  assert.ok(v.gaps.some((p) => /Fair/.test(p)));
 });
 t("AN OVERLAP IS REPORTED — one condition would have two prices", () => {
   const overlapping = { programId: "x", rungs: [
     { label: "A", span: spanOf("flawless", "fair") },
     { label: "B", span: spanOf("good", "broken") },
   ]};
+  // An overlap alone no longer fails a ladder — it is how a finer scale maps
+  // onto a coarser canonical one — but it is always reported.
   const v = validateLadder(overlapping);
-  assert.equal(v.ok, false);
-  assert.ok(v.problems.some((p) => /covered by 2 rungs/.test(p)));
+  assert.ok(v.overlaps.some((p) => /priced by 2 rungs/.test(p)));
+  assert.deepEqual(v.gaps, []);
 });
 t("duplicate labels are caught", () => {
   const dup = { programId: "x", rungs: [
     { label: "Good", span: spanOf("flawless", "good") },
     { label: "good", span: spanOf("fair", "broken") },
   ]};
-  assert.ok(validateLadder(dup).problems.some((p) => /duplicate/i.test(p)));
+  assert.ok(validateLadder(dup).duplicates.length > 0);
+  assert.equal(validateLadder(dup).ok, false);
 });
 t("an empty ladder is invalid, not vacuously fine", () => {
   assert.equal(validateLadder({ programId: "x", rungs: [] }).ok, false);
