@@ -248,3 +248,50 @@ export function compareDevice(deviceId: string, market: MarketCode, channel: Cha
 export function quarantineCount(): number {
   return (db().prepare("SELECT count(*) c FROM quarantine WHERE resolved_at IS NULL").get() as { c: number }).c;
 }
+
+export type Coverage = {
+  /** Quotes per market for this device: which markets actually have data. */
+  quotes: Array<{ market: MarketCode; programs: number; quotes: number }>;
+  /** Channels with a market (sell-side) price in the given market. */
+  channels: Channel[];
+  totalQuotes: number;
+};
+
+/**
+ * WHERE THIS DEVICE HAS DATA.
+ *
+ * A market-scoped comparison shows nothing when the device is not quoted in
+ * that market — which is correct, and indistinguishable from a broken page.
+ * "Empty because you are looking at the wrong market" and "empty because
+ * nobody has this data" are very different facts and the screen owed the
+ * reader both.
+ */
+export function coverageFor(deviceId: string, market: MarketCode): Coverage {
+  const d = db();
+  const quotes = d.prepare(
+    `SELECT p.market, count(DISTINCT o.program_id) programs, count(*) quotes
+       FROM observations o JOIN programs p ON p.id = o.program_id
+      WHERE o.device_id = ? AND o.amount_minor IS NOT NULL
+      GROUP BY p.market ORDER BY quotes DESC`
+  ).all(deviceId) as Array<{ market: MarketCode; programs: number; quotes: number }>;
+
+  const channels = (d.prepare(
+    "SELECT DISTINCT channel FROM market_prices WHERE device_id = ? AND market = ?"
+  ).all(deviceId, market) as Array<{ channel: Channel }>).map((r) => r.channel);
+
+  return { quotes, channels, totalQuotes: quotes.reduce((t, q) => t + q.quotes, 0) };
+}
+
+/**
+ * A sensible landing device — the one with the most quotes.
+ *
+ * `devices[0]` was alphabetical, which out of 2,566 devices meant the compare
+ * page opened on something arbitrary that usually had no data at all.
+ */
+export function busiestDeviceId(): string | null {
+  const r = db().prepare(
+    `SELECT device_id, count(*) n FROM observations
+      WHERE amount_minor IS NOT NULL GROUP BY device_id ORDER BY n DESC LIMIT 1`
+  ).get() as { device_id: string } | undefined;
+  return r?.device_id ?? null;
+}

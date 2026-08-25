@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { seed } from "@/lib/seed.ts";
 import { requireSuperIQ } from "@/lib/guard.ts";
-import { compareDevice, listDevices } from "@/lib/repo.ts";
+import { compareDevice, listDevices, coverageFor, busiestDeviceId } from "@/lib/repo.ts";
 import { fullLabel, skuLabel } from "@/core/search.ts";
 import DevicePickerClient from "@/components/DevicePickerClient";
 import { MARKETS, type MarketCode } from "@/core/markets.ts";
-import { CHANNELS, type Channel } from "@/core/channel.ts";
+import { CHANNELS, CHANNEL_LABEL, type Channel } from "@/core/channel.ts";
 import { describeSpan } from "@/core/condition.ts";
 import { formatMoney } from "@/core/money.ts";
 import { formatGross } from "@/core/spread.ts";
@@ -40,12 +40,19 @@ export default async function Compare({
   /* Look the device up, never list them all.
      Rendering 2,566 chips shipped 1.5 MB of markup so somebody could pick one. */
   const devices = listDevices();
-  const deviceId = sp.device && devices.some((d) => d.id === sp.device) ? sp.device : devices[0].id;
+  const deviceId = sp.device && devices.some((d) => d.id === sp.device)
+    ? sp.device
+    // Landing on devices[0] meant landing alphabetically — out of 2,566, almost
+    // always on something with no data at all.
+    : (busiestDeviceId() ?? devices[0].id);
   const market = (sp.market && MARKETS[sp.market as MarketCode] ? sp.market : "US") as MarketCode;
   const channel = (sp.channel && CHANNELS.some((c) => c.id === sp.channel) ? sp.channel : "wholesale") as Channel;
 
   const device = devices.find((d) => d.id === deviceId)!;
   const r = compareDevice(deviceId, market, channel);
+  const cov = coverageFor(deviceId, market);
+  const here = cov.quotes.find((q) => q.market === market);
+  const elsewhere = cov.quotes.filter((q) => q.market !== market);
   const link = (o: Record<string, string>) =>
     `/compare?${new URLSearchParams({ device: deviceId, market, channel, ...o }).toString()}`;
 
@@ -106,6 +113,62 @@ export default async function Compare({
           );
         })}
       </div>
+
+      {/* WHY THIS SCREEN MIGHT BE EMPTY — two different reasons, said plainly. */}
+      {!here && (
+        <div className="panel mt-6 border-l-[3px] p-4" style={{ borderColor: "var(--gold-2)" }}>
+          <div className="text-[14px] font-bold">
+            No programme in {MARKETS[market].name} quotes this device.
+          </div>
+          {elsewhere.length > 0 ? (
+            <p className="mt-1.5 text-[13px] text-[var(--muted)]">
+              It is quoted in{" "}
+              {elsewhere.map((q, i) => (
+                <span key={q.market}>
+                  {i > 0 && ", "}
+                  <Link href={link({ market: q.market })} className="font-semibold text-[var(--brand)]">
+                    {MARKETS[q.market].name}
+                  </Link>{" "}
+                  ({q.quotes} price{q.quotes === 1 ? "" : "s"} from {q.programs} programme
+                  {q.programs === 1 ? "" : "s"})
+                </span>
+              ))}
+              . Coverage is per market — a device priced in one is not automatically priced in another.
+            </p>
+          ) : (
+            <p className="mt-1.5 text-[13px] text-[var(--muted)]">
+              No programme anywhere quotes it yet. It is in the catalogue because a source named it,
+              which is not the same as a source pricing it.
+            </p>
+          )}
+        </div>
+      )}
+
+      {here && !r.marketPrice && (
+        <div className="panel mt-6 border-l-[3px] p-4" style={{ borderColor: "var(--gold-2)" }}>
+          <div className="text-[14px] font-bold">
+            {here.quotes} trade-in price{here.quotes === 1 ? "" : "s"} here — but no {CHANNELS.find((c) => c.id === channel)!.label.toLowerCase()} market price.
+          </div>
+          <p className="mt-1.5 text-[13px] text-[var(--muted)]">
+            A spread needs both sides. We know what {MARKETS[market].name} programmes will PAY for
+            this device; we do not yet know what it SELLS for.
+            {cov.channels.length > 0 ? (
+              <> There is a price for{" "}
+                {cov.channels.map((c, i) => (
+                  <span key={c}>
+                    {i > 0 && ", "}
+                    <Link href={link({ channel: c })} className="font-semibold text-[var(--brand)]">
+                      {CHANNEL_LABEL[c]}
+                    </Link>
+                  </span>
+                ))}.
+              </>
+            ) : (
+              <> Record one on the <Link href={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/entry`} className="font-semibold text-[var(--brand)]">entry page</Link> and every quote below becomes a spread.</>
+            )}
+          </p>
+        </div>
+      )}
 
       {/* the market price this channel is measured against */}
       {r.marketPrice ? (
