@@ -91,10 +91,65 @@ one to fake — forty half-working programmes produce a dashboard full of stale
 numbers, which is worse than nine that are right. USD, AED and INR between them
 already stress the comparison layer properly.
 
+## Market pricing and channels
+
+A trade-in price on its own answers nothing. "Programme A pays $890" is a fact;
+whether it is a *good* fact depends on what the handset actually sells for — and
+that depends on **who is buying**. Retail, online, wholesale, enterprise and
+auction are five different businesses, and averaging them into one "market
+price" describes none of them.
+
+`channel.ts` holds the market price (with its **sample size** and **dispersion**,
+because a median from two listings is an anecdote), and `spread.ts` does the
+subtraction that matters:
+
+    trade-in   $394.16     what the programme pays
+    market     $662.35     wholesale, Flawless–Good, 18 comparables
+    spread     $268.19     40.5% margin — firm
+
+### Confidence propagates from the weakest input
+
+A spread is `firm` only if **every** input was firm. Any of these makes it
+`indicative` — still shown, because a rough number beats none at a counter, but
+never dressed as precision it does not have:
+
+- the condition match is approximate rather than exact
+- the market price came from fewer than five comparables
+- the comparables are scattered
+- an FX rate was used from outside the observation window
+- the two legs were observed more than a fortnight apart
+
+Where conditions genuinely do not overlap, **no number is produced at all**.
+
+And `rankByChannel` sorts firm above indicative *whatever the margins say*. In
+the worked example a 48.4% indicative row sits below a 40.5% firm one —
+sorting on margin alone sends a buyer at exactly the row the system is least
+sure about, which quietly discards the entire confidence model.
+
+## The app
+
+    npm install && npm run dev     # localhost:4100
+
+Four screens, all server-rendered, all computing every number through `core/`:
+
+| | |
+|---|---|
+| **Overview** | coverage per market, clearance status, quarantine depth |
+| **Programmes** | each with its own condition ladder rendered — you can see why comparison takes work |
+| **Devices** | the canonical catalogue every listing string resolves against |
+| **Compare** | trade-in quotes vs market price, per channel, with confidence |
+
+The repository layer does **no arithmetic**. "Last change" is derived from the
+observation series on read rather than stored, so the column on screen and the
+data underneath cannot disagree.
+
+Every screen carries a permanent banner saying the data is a worked example.
+Nothing is cleared for collection, so nothing here was observed — and a
+price-intelligence product whose demo data is indistinguishable from its real
+data is one screenshot away from somebody trading on a figure nobody measured.
+
 ## Not built yet
 
-- The web application (programmes, devices, prices, runs, alerts, compare).
-- Persistence. The core is deliberately storage-free so it can be tested
-  without a database; the schema follows the shapes in `core/`.
 - Any collector. See above — that is a clearance question first.
-- FX rate sourcing. `convert()` takes rates; nothing fetches them yet.
+- FX rate sourcing. `convert()` takes rates; the seed fabricates them.
+- Alerts, run scheduling, the quarantine resolution UI, multi-org auth.

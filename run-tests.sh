@@ -7,7 +7,7 @@ set -uo pipefail
 cd "$(dirname "$0")"
 
 fail=0
-for suite in device condition money observation ingest markets; do
+for suite in device condition money observation ingest markets spread; do
   echo
   echo "== $suite ============================================================"
   node --experimental-strip-types --no-warnings "core/tests/$suite.test.mjs" || fail=1
