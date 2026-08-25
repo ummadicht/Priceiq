@@ -1,4 +1,15 @@
-# Trade-in price intelligence — core
+# PriceIQ — price & channel intelligence
+
+**A SuperIQ engine.** Buy and sell against live market data.
+
+> ⚠ **Naming.** thesuperiq.com already ships this engine as **PricingIQ** at
+> `/pricingiq` — "Price & channel · Buy and sell against live market data" — which
+> is precisely this product. It is built here as **PriceIQ** as requested
+> (PricingIQ is the only gerund beside GradeIQ, CoreIQ, RefurbIQ, ProcureIQ), but
+> the two names must converge: either rename the marketing page, or change
+> `PRODUCT` in `lib/brand.ts`. It is one constant so the switch is free.
+
+## Core
 
 Monitors what trade-in programmes pay for a given handset, across **the United
 States, the UAE and India**, and makes those prices comparable.

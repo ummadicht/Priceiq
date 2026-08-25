@@ -87,7 +87,7 @@ export default async function Compare({
             >
               <div className="label">{c.label}</div>
               <div className="mono mt-1 text-[19px] font-extrabold"
-                   style={{ color: c.best && c.best.grossPct > 0 ? "var(--accent)" : "var(--muted)" }}>
+                   style={{ color: c.best && c.best.grossPct > 0 ? "var(--green-ink)" : "var(--muted)" }}>
                 {c.medianGrossPct === null ? "—" : `${c.medianGrossPct}%`}
               </div>
               <div className="text-[11px] text-[var(--muted)]">
@@ -146,7 +146,7 @@ export default async function Compare({
                 </td>
                 <td className="mono" style={{ textAlign: "right" }}>{formatMoney(row.quote)}</td>
                 <td className="mono font-bold" style={{ textAlign: "right",
-                  color: row.spread ? (row.spread.grossMinor >= 0 ? "var(--accent)" : "var(--bad)") : "var(--muted)" }}>
+                  color: row.spread ? (row.spread.grossMinor >= 0 ? "var(--green-ink)" : "var(--bad)") : "var(--muted)" }}>
                   {row.spread ? formatGross(row.spread) : "—"}
                 </td>
                 <td className="mono" style={{ textAlign: "right" }}>
@@ -156,7 +156,7 @@ export default async function Compare({
                   {row.spread ? (
                     <span
                       className="mono text-[11px] font-bold uppercase tracking-wide"
-                      style={{ color: row.spread.confidence === "firm" ? "var(--accent)" : "var(--warn)" }}
+                      style={{ color: row.spread.confidence === "firm" ? "var(--green-ink)" : "var(--amber-ink)" }}
                       title={row.spread.caveats.join("  ")}
                     >
                       {row.spread.confidence}
@@ -188,7 +188,7 @@ export default async function Compare({
           <ul className="mt-2 space-y-1.5 text-[12.5px] text-[var(--muted)]">
             {r.rows.filter((x) => x.spread && x.spread.caveats.length).slice(0, 6).map((x) => (
               <li key={x.programId}>
-                <b className="text-[var(--ink)]">{x.programName}</b> — {x.spread!.caveats.join(" ")}
+                <b className="text-[var(--text)]">{x.programName}</b> — {x.spread!.caveats.join(" ")}
               </li>
             ))}
           </ul>
@@ -211,7 +211,7 @@ function Chip({ href, on, label, title }: { href: string; on: boolean; label: st
   return (
     <Link href={href} title={title} className="border px-2.5 py-1 text-[11.5px] font-semibold"
       style={on ? { borderColor: "var(--brand)", background: "var(--brand)", color: "#fff" }
-                : { borderColor: "var(--line)", color: "var(--muted)" }}>
+                : { borderColor: "var(--border)", color: "var(--muted)" }}>
       {label}
     </Link>
   );

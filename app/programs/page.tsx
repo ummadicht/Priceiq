@@ -45,8 +45,8 @@ export default async function Programs({ searchParams }: { searchParams: Promise
                 className="mono shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide"
                 style={
                   p.cleared
-                    ? { background: "var(--accent-soft)", color: "var(--accent)" }
-                    : { background: "var(--warn-soft)", color: "var(--warn)" }
+                    ? { background: "var(--green-soft)", color: "var(--green-ink)" }
+                    : { background: "color-mix(in srgb, var(--yellow) 14%, transparent)", color: "var(--amber-ink)" }
                 }
                 title={p.cleared ? p.authority : "Not cleared for collection — no authority recorded"}
               >
@@ -54,7 +54,7 @@ export default async function Programs({ searchParams }: { searchParams: Promise
               </span>
             </div>
 
-            <div className="mt-3 grid grid-cols-3 gap-2 border-y border-[var(--line-soft)] py-2.5">
+            <div className="mt-3 grid grid-cols-3 gap-2 border-y border-[var(--border-soft)] py-2.5">
               <Cell label="Observations" value={p.priceCount.toLocaleString()} />
               <Cell label="Last change" value={p.lastChangeAgo} />
               <Cell
@@ -70,7 +70,7 @@ export default async function Programs({ searchParams }: { searchParams: Promise
                 {p.ladder.map((r) => (
                   <span
                     key={r.label}
-                    className="border border-[var(--line)] px-1.5 py-0.5 text-[11px]"
+                    className="border border-[var(--border)] px-1.5 py-0.5 text-[11px]"
                     title={`maps to ${describeSpan(r.span)}`}
                   >
                     {r.label}
@@ -100,7 +100,7 @@ function Cell({ label, value, sub }: { label: string; value: string; sub?: strin
     <div>
       <div className="label">{label}</div>
       <div className="mono mt-0.5 text-[13.5px] font-bold">{value}</div>
-      {sub && <div className="text-[10.5px]" style={{ color: "var(--warn)" }}>{sub}</div>}
+      {sub && <div className="text-[10.5px]" style={{ color: "var(--amber-ink)" }}>{sub}</div>}
     </div>
   );
 }
@@ -112,7 +112,7 @@ function Chip({ href, on, label }: { href: string; on: boolean; label: string })
       className="border px-2.5 py-1 text-[11.5px] font-semibold"
       style={on
         ? { borderColor: "var(--brand)", background: "var(--brand)", color: "#fff" }
-        : { borderColor: "var(--line)", color: "var(--muted)" }}
+        : { borderColor: "var(--border)", color: "var(--muted)" }}
     >
       {label}
     </Link>
