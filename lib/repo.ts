@@ -116,6 +116,26 @@ export function fxRates(): FxRate[] {
     .map((r) => ({ base: String(r.base), quote: String(r.quote), rate: Number(r.rate), asOf: String(r.as_of) }));
 }
 
+export type RateRow = { base: string; quote: string; rate: number; asOf: string; source: string };
+
+/** The rate that would be used for a pair on a date, with its provenance. */
+export function rateInForce(base: string, quote: string, onDate: string): RateRow | null {
+  const r = db().prepare(
+    `SELECT base, quote, rate, as_of, source FROM fx_rates
+      WHERE base=? AND quote=?
+      ORDER BY abs(julianday(as_of) - julianday(?)) LIMIT 1`
+  ).get(base, quote, onDate.slice(0, 10)) as Record<string, unknown> | undefined;
+  return r ? { base: String(r.base), quote: String(r.quote), rate: Number(r.rate),
+               asOf: String(r.as_of), source: String(r.source || "") } : null;
+}
+
+/** Record a real rate. Overwrites whatever was there for that date. */
+export function setRate(base: string, quote: string, rate: number, asOf: string, source: string) {
+  db().prepare(
+    "INSERT OR REPLACE INTO fx_rates (base, quote, rate, as_of, source) VALUES (?,?,?,?,?)"
+  ).run(base.toUpperCase(), quote.toUpperCase(), rate, asOf.slice(0, 10), source);
+}
+
 function marketPrices(deviceId: string, market: MarketCode): MarketPrice[] {
   return (db().prepare(
     "SELECT * FROM market_prices WHERE device_id=? AND market=? ORDER BY observed_at DESC"

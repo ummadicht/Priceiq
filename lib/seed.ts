@@ -166,7 +166,7 @@ export function seed(): { programs: number; devices: number; observations: numbe
   const insMp = d.prepare(
     "INSERT INTO market_prices (device_id,market,channel,cond_lo,cond_hi,amount_minor,currency,observed_at,sample_size,dispersion_pct,source) VALUES (?,?,?,?,?,?,?,?,?,?,?)"
   );
-  const insFx = d.prepare("INSERT OR REPLACE INTO fx_rates (base,quote,rate,as_of) VALUES (?,?,?,?)");
+  const insFx = d.prepare("INSERT OR IGNORE INTO fx_rates (base,quote,rate,as_of,source) VALUES (?,?,?,?,?)");
   const insRun = d.prepare(
     "INSERT INTO runs (id,program_id,started_at,finished_at,status,captured,errors,quarantined,note) VALUES (?,?,?,?,?,?,?,?,?)"
   );
@@ -185,7 +185,9 @@ export function seed(): { programs: number; devices: number; observations: numbe
       const asOf = day(back).toISOString().slice(0, 10);
       for (const f of FX) {
         const drift = 1 + (r() - 0.5) * 0.012;
-        insFx.run(f.base, f.quote, Math.round(f.rate * drift * 10000) / 10000, asOf);
+        // OR IGNORE, and stamped as an example: a real rate recorded later must
+        // never be overwritten by an invented one on the next start.
+        insFx.run(f.base, f.quote, Math.round(f.rate * drift * 10000) / 10000, asOf, SEED_SOURCE);
       }
     }
 

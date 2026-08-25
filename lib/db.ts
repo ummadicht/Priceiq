@@ -98,10 +98,15 @@ function init(): Database.Database {
     -- Rates are stored per DATE, never "latest", so a historical conversion is
     -- reproducible instead of being re-derived at today's rate.
     CREATE TABLE IF NOT EXISTS fx_rates (
-      base  TEXT NOT NULL,
-      quote TEXT NOT NULL,
-      rate  REAL NOT NULL,
-      as_of TEXT NOT NULL,
+      base   TEXT NOT NULL,
+      quote  TEXT NOT NULL,
+      rate   REAL NOT NULL,
+      as_of  TEXT NOT NULL,
+      -- WHERE THE RATE CAME FROM. A currency rate is a source like any other,
+      -- and an unattributed one is how a 13% error hides: the seeded rate here
+      -- was 84.09 INR/USD while the real mid-market was 95.35, so every USD
+      -- figure derived from it was wrong by that much and looked fine.
+      source TEXT NOT NULL DEFAULT '',
       PRIMARY KEY (base, quote, as_of)
     );
 
@@ -188,6 +193,7 @@ function migrate(db: Database.Database) {
     ["market_prices", "week", "ALTER TABLE market_prices ADD COLUMN week TEXT NOT NULL DEFAULT ''"],
     ["programs", "note", "ALTER TABLE programs ADD COLUMN note TEXT NOT NULL DEFAULT ''"],
     ["devices", "ram_gb", "ALTER TABLE devices ADD COLUMN ram_gb INTEGER"],
+    ["fx_rates", "source", "ALTER TABLE fx_rates ADD COLUMN source TEXT NOT NULL DEFAULT ''"],
   ];
   for (const [table, column, stmt] of need) {
     const cols = new Set(

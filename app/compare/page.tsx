@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { seed } from "@/lib/seed.ts";
 import { requireSuperIQ } from "@/lib/guard.ts";
-import { compareDevice, listDevices, coverageFor, busiestDeviceId } from "@/lib/repo.ts";
+import { compareDevice, listDevices, coverageFor, busiestDeviceId, rateInForce } from "@/lib/repo.ts";
+import { convert } from "@/core/money.ts";
+import { fxRates } from "@/lib/repo.ts";
 import { fullLabel, skuLabel } from "@/core/search.ts";
 import DevicePickerClient from "@/components/DevicePickerClient";
 import { MARKETS, type MarketCode } from "@/core/markets.ts";
@@ -52,6 +54,16 @@ export default async function Compare({
   const r = compareDevice(deviceId, market, channel);
   const cov = coverageFor(deviceId, market);
   const here = cov.quotes.find((q) => q.market === market);
+  /* A USD reference beside every local figure. Rupees are the truth of what an
+     Indian programme pays; dollars are what make it comparable to Dubai and the
+     US, and without one on the page everybody converts it themselves at
+     whatever rate their browser found. */
+  const rates = fxRates();
+  const usdRate = r.reportIn === "USD" ? null : rateInForce("USD", r.reportIn, new Date().toISOString());
+  const usd = (m: Parameters<typeof convert>[0], at: string) => {
+    const c = convert(m, "USD", at, rates);
+    return c.ok ? `$${(c.value.money.amountMinor / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : null;
+  };
   const elsewhere = cov.quotes.filter((q) => q.market !== market);
   const link = (o: Record<string, string>) =>
     `/compare?${new URLSearchParams({ device: deviceId, market, channel, ...o }).toString()}`;
@@ -216,7 +228,14 @@ export default async function Compare({
                     {row.conditionSpan ? describeSpan(row.conditionSpan) : "not on ladder"}
                   </div>
                 </td>
-                <td className="mono" style={{ textAlign: "right" }}>{formatMoney(row.quote)}</td>
+                <td className="mono" style={{ textAlign: "right" }}>
+                  {formatMoney(row.quote)}
+                  {usdRate && (
+                    <div className="text-[11px] font-normal text-[var(--muted)]">
+                      {usd(row.quote, row.observedAt) ?? "—"}
+                    </div>
+                  )}
+                </td>
                 <td className="mono font-bold" style={{ textAlign: "right",
                   color: row.spread ? (row.spread.grossMinor >= 0 ? "var(--green-ink)" : "var(--bad)") : "var(--muted)" }}>
                   {row.spread ? formatGross(row.spread) : "—"}
@@ -252,6 +271,20 @@ export default async function Compare({
           </tbody>
         </table>
       </div>
+
+      {/* the USD reference, and where it came from */}
+      {usdRate && r.rows.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-baseline justify-between gap-3 text-[12px] text-[var(--muted)]">
+          <span>
+            USD shown at <b className="mono text-[var(--text)]">{usdRate.rate.toFixed(4)} {r.reportIn}/USD</b>{" "}
+            as of {usdRate.asOf} — {usdRate.source || <b style={{ color: "var(--amber-ink)" }}>no source recorded</b>}
+          </span>
+          <a href={`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/api/export?market=${market}`}
+             className="font-semibold text-[var(--brand)]">
+            Export {MARKETS[market].name} · CSV, both currencies ↓
+          </a>
+        </div>
+      )}
 
       {/* caveats, spelled out rather than hidden in a tooltip */}
       {r.rows.some((x) => x.spread && x.spread.caveats.length) && (
