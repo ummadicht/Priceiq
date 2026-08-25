@@ -110,7 +110,7 @@ export default async function Compare({
           <div className="text-[12.5px] text-[var(--muted)]">
             {describeSpan(r.marketPrice.condition)} · from {r.marketPrice.sampleSize} comparable
             {r.marketPrice.sampleSize === 1 ? "" : "s"}
-            {r.marketPrice.dispersionPct !== null && <> · ±{r.marketPrice.dispersionPct}% spread</>}
+            {r.marketPrice.dispersionPct !== null && <> · ±{r.marketPrice.dispersionPct}% scatter</>}
             <> · {since(r.marketPrice.observedAt)} ago</>
           </div>
         </div>

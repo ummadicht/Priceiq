@@ -64,9 +64,14 @@ export type MarketPrice = {
    */
   sampleSize: number;
   /**
-   * Spread of those comps as a percentage of the median, when known. A tight
+   * SCATTER of those comps, as a percentage of the median, when known. A tight
    * cluster and a wild scatter can produce the same median and mean very
    * different things.
+   *
+   * Deliberately NOT called "spread" anywhere user-facing: in this product
+   * "spread" means market price minus trade-in price — the margin — and one
+   * word cannot mean both the profit and the error bar on a page that shows
+   * them side by side.
    */
   dispersionPct: number | null;
   /** Where the figure came from, so a disputed number can be traced. */

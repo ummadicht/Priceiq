@@ -24,6 +24,8 @@ const NAV = [
   { href: "/programs", label: "Programmes" },
   { href: "/devices", label: "Devices" },
   { href: "/compare", label: "Compare" },
+  { href: "/trends", label: "Week on week" },
+  { href: "/entry", label: "Record price" },
 ];
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

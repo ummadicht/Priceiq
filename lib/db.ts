@@ -87,9 +87,12 @@ function init(): Database.Database {
       observed_at    TEXT NOT NULL,
       sample_size    INTEGER NOT NULL DEFAULT 0,
       dispersion_pct REAL,
-      source         TEXT NOT NULL DEFAULT ''
+      source         TEXT NOT NULL DEFAULT '',
+      entered_by     TEXT NOT NULL DEFAULT '',
+      week           TEXT NOT NULL DEFAULT ''
     );
     CREATE INDEX IF NOT EXISTS idx_mp ON market_prices(device_id, market, channel, observed_at);
+    CREATE INDEX IF NOT EXISTS idx_mp_week ON market_prices(device_id, market, channel, week);
 
     -- Rates are stored per DATE, never "latest", so a historical conversion is
     -- reproducible instead of being re-derived at today's rate.
@@ -100,6 +103,23 @@ function init(): Database.Database {
       as_of TEXT NOT NULL,
       PRIMARY KEY (base, quote, as_of)
     );
+
+    -- Who entered a hand-typed price, and on whose authority.
+    --
+    -- Manual entry is a first-class collector (core/collection.ts), so its
+    -- output needs the same provenance an automated one would carry. Without
+    -- entered_by and source, a disputed number six weeks from now is
+    -- unattributable — and a price nobody will stand behind is not evidence.
+    CREATE TABLE IF NOT EXISTS entries (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind         TEXT NOT NULL,              -- market_price | quote
+      ref_id       INTEGER,                    -- row created in the target table
+      entered_by   TEXT NOT NULL DEFAULT '',
+      week         TEXT NOT NULL DEFAULT '',   -- ISO week the figure is FOR
+      note         TEXT NOT NULL DEFAULT '',
+      created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_entries ON entries(kind, created_at);
 
     CREATE TABLE IF NOT EXISTS runs (
       id          TEXT PRIMARY KEY,
@@ -135,7 +155,29 @@ function init(): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_quar ON quarantine(program_id, resolved_at);
   `);
 
+  migrate(db);
   return db;
+}
+
+/**
+ * Columns added after a table first shipped.
+ *
+ * `CREATE TABLE IF NOT EXISTS` is a no-op on an existing table, so every column
+ * added later is invisible to a database that already exists — and the symptom
+ * is every page 500ing at once, which is exactly how this was found. New
+ * columns go here as well as in the CREATE above.
+ */
+function migrate(db: Database.Database) {
+  const need: Array<[string, string, string]> = [
+    ["market_prices", "entered_by", "ALTER TABLE market_prices ADD COLUMN entered_by TEXT NOT NULL DEFAULT ''"],
+    ["market_prices", "week", "ALTER TABLE market_prices ADD COLUMN week TEXT NOT NULL DEFAULT ''"],
+  ];
+  for (const [table, column, stmt] of need) {
+    const cols = new Set(
+      (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name)
+    );
+    if (!cols.has(column)) db.exec(stmt);
+  }
 }
 
 export function db(): Database.Database {
