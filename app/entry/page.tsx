@@ -1,6 +1,5 @@
 import { seed } from "@/lib/seed.ts";
 import { requireSuperIQ } from "@/lib/guard.ts";
-import { listDevices } from "@/lib/repo.ts";
 import EntryForm from "@/components/EntryForm";
 
 export const dynamic = "force-dynamic";
@@ -8,7 +7,6 @@ export const dynamic = "force-dynamic";
 export default async function Entry() {
   await requireSuperIQ("/priceiq/entry");
   seed();
-  const devices = listDevices();
   const base = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
   return (
@@ -21,7 +19,7 @@ export default async function Entry() {
         can tell the difference, and the figure carries your name and your stated source.
       </p>
       <div className="mt-6">
-        <EntryForm devices={devices} base={base} />
+        <EntryForm base={base} />
       </div>
     </>
   );

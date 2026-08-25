@@ -1,46 +1,58 @@
-import Link from "next/link";
 import { seed } from "@/lib/seed.ts";
 import { requireSuperIQ } from "@/lib/guard.ts";
 import { listDevices } from "@/lib/repo.ts";
+import { brandsOf } from "@/core/search.ts";
+import DevicePickerClient from "@/components/DevicePickerClient";
 import SeedBanner from "../banner";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * The catalogue, by manufacturer.
+ *
+ * It used to render every device as a table row — 2,566 of them, 3 MB of
+ * markup, and unusable the moment a real source landed. The full list is not
+ * a useful artefact at this size; what people want is either "find this one"
+ * or "what does this manufacturer have", and both are here.
+ */
 export default async function Devices() {
   await requireSuperIQ("/priceiq/devices");
   seed();
   const devices = listDevices();
+  const brands = brandsOf(devices);
+  const base = process.env.NEXT_PUBLIC_BASE_PATH || "";
+  const withRam = devices.filter((d) => d.ramGb !== undefined).length;
+
   return (
     <>
       <SeedBanner />
-      <h1 className="text-[26px] font-extrabold tracking-tight">Device catalogue</h1>
-      <p className="mt-1 max-w-2xl text-[13.5px] text-[var(--muted)]">
-        The canonical list every programme&apos;s listing string is resolved against. Storage is part of
-        the identity, not an attribute — a 256GB and a 512GB handset are different devices with
-        different prices, and a listing that omits storage is reported as ambiguous rather than guessed at.
+      <div className="editorial-rule mb-4 w-full max-w-[420px]" />
+      <h1 className="text-[28px] font-extrabold tracking-[-.04em]">Device catalogue</h1>
+      <p className="mt-1.5 max-w-2xl text-[13.5px] text-[var(--muted)]">
+        {devices.length.toLocaleString()} canonical devices across {brands.length} manufacturers —
+        the list every programme&apos;s listing string is resolved against. Storage is part of the
+        identity, and so is RAM on the {withRam.toLocaleString()} devices whose sources price it
+        separately.
       </p>
-      <div className="panel mt-6 overflow-x-auto p-4">
-        <table>
-          <thead>
-            <tr><th>Device</th><th>Storage</th><th>Released</th><th>Model numbers</th><th>Canonical id</th><th></th></tr>
-          </thead>
-          <tbody>
-            {devices.map((d) => (
-              <tr key={d.id}>
-                <td className="font-semibold">{d.brand} {d.model}</td>
-                <td className="mono">{d.storageGb >= 1024 ? `${d.storageGb / 1024}TB` : `${d.storageGb}GB`}</td>
-                <td className="mono">{d.releaseYear}</td>
-                <td className="mono text-[12px] text-[var(--muted)]">{d.aliases.join(", ") || "—"}</td>
-                <td className="mono text-[11.5px] text-[var(--muted)]">{d.id}</td>
-                <td style={{ textAlign: "right" }}>
-                  <Link href={`/compare?device=${d.id}`} className="text-[12.5px] font-semibold text-[var(--brand)]">
-                    Compare →
-                  </Link>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+
+      <div className="mt-6">
+        <DevicePickerClient
+          base={base}
+          current={null}
+          path="/compare"
+        />
+      </div>
+
+      <div className="panel mt-5 p-5">
+        <div className="label">By manufacturer</div>
+        <div className="mt-3 grid gap-x-6 gap-y-1.5 sm:grid-cols-2 lg:grid-cols-4">
+          {brands.map((b) => (
+            <div key={b.brand} className="flex items-baseline justify-between gap-3 border-b border-[var(--border-soft)] pb-1">
+              <span className="text-[13px] font-semibold">{b.brand}</span>
+              <span className="mono text-[12px] text-[var(--muted)]">{b.count.toLocaleString()}</span>
+            </div>
+          ))}
+        </div>
       </div>
     </>
   );

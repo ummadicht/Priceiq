@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { CHANNELS, type Channel } from "@/core/channel.ts";
 import { MARKETS, type MarketCode } from "@/core/markets.ts";
 import { currentWeek, weekStart } from "@/core/week.ts";
+import DevicePicker from "./DevicePicker";
 
 /**
  * The manual-entry form.
@@ -19,15 +20,19 @@ import { currentWeek, weekStart } from "@/core/week.ts";
  *      can be displayed but never scored.
  */
 
-type Device = { id: string; brand: string; model: string; storageGb: number };
+type Device = { id: string; brand: string; model: string; storageGb: number; ramGb?: number };
 type Last = {
   amount_minor: number; currency: string; sample_size: number;
   dispersion_pct: number | null; source: string; observed_at: string;
   week: string; entered_by: string;
 } | null;
 
-export default function EntryForm({ devices, base }: { devices: Device[]; base: string }) {
-  const [deviceId, setDeviceId] = useState(devices[0]?.id ?? "");
+export default function EntryForm({ base }: { base: string }) {
+  /* The device is chosen through the shared picker rather than a <select>.
+     A select of the whole catalogue put 2,566 options in the page and pushed
+     this form to 645 KB — the same bug the compare page had. */
+  const [deviceId, setDeviceId] = useState("");
+  const [deviceLabel, setDeviceLabel] = useState("");
   const [market, setMarket] = useState<MarketCode>("US");
   const [channel, setChannel] = useState<Channel>("wholesale");
   const [amount, setAmount] = useState("");
@@ -90,14 +95,14 @@ export default function EntryForm({ devices, base }: { devices: Device[]; base: 
     <form onSubmit={submit} className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
       <div className="panel p-5">
         <div className="label">1 &middot; Which price</div>
-        <div className="mt-3 grid gap-3 sm:grid-cols-3">
-          <Field label="Device">
-            <select className="inp" value={deviceId} onChange={(e) => setDeviceId(e.target.value)}>
-              {devices.map((d) => (
-                <option key={d.id} value={d.id}>{d.brand} {d.model} {d.storageGb}GB</option>
-              ))}
-            </select>
-          </Field>
+        <div className="mt-3">
+          <DevicePicker
+            base={base}
+            current={deviceId ? { id: deviceId, label: deviceLabel } : null}
+            onPick={(id, label) => { setDeviceId(id); setDeviceLabel(label || id); }}
+          />
+        </div>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
           <Field label="Market">
             <select className="inp" value={market} onChange={(e) => setMarket(e.target.value as MarketCode)}>
               {(Object.keys(MARKETS) as MarketCode[]).map((m) => (
@@ -156,8 +161,8 @@ export default function EntryForm({ devices, base }: { devices: Device[]; base: 
 
         <button className="mt-5 w-full px-5 py-3 text-[13px] font-bold uppercase tracking-[.1em] text-white disabled:opacity-40"
                 style={{ background: "var(--text)" }}
-                disabled={busy || !amount || !sampleSize || !source}>
-          {busy ? "Saving…" : `Record for ${week}`}
+                disabled={busy || !deviceId || !amount || !sampleSize || !source}>
+          {busy ? "Saving…" : !deviceId ? "Pick a device first" : `Record for ${week}`}
         </button>
       </div>
 

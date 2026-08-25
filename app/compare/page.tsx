@@ -2,6 +2,8 @@ import Link from "next/link";
 import { seed } from "@/lib/seed.ts";
 import { requireSuperIQ } from "@/lib/guard.ts";
 import { compareDevice, listDevices } from "@/lib/repo.ts";
+import { fullLabel, skuLabel } from "@/core/search.ts";
+import DevicePickerClient from "@/components/DevicePickerClient";
 import { MARKETS, type MarketCode } from "@/core/markets.ts";
 import { CHANNELS, type Channel } from "@/core/channel.ts";
 import { describeSpan } from "@/core/condition.ts";
@@ -35,6 +37,8 @@ export default async function Compare({
   await requireSuperIQ("/priceiq/compare");
   seed();
   const sp = await searchParams;
+  /* Look the device up, never list them all.
+     Rendering 2,566 chips shipped 1.5 MB of markup so somebody could pick one. */
   const devices = listDevices();
   const deviceId = sp.device && devices.some((d) => d.id === sp.device) ? sp.device : devices[0].id;
   const market = (sp.market && MARKETS[sp.market as MarketCode] ? sp.market : "US") as MarketCode;
@@ -49,21 +53,24 @@ export default async function Compare({
     <>
       <SeedBanner />
       <h1 className="text-[26px] font-extrabold tracking-tight">
-        {device.brand} {device.model} <span className="text-[var(--muted)]">{device.storageGb}GB</span>
+        {device.brand} {device.model} <span className="text-[var(--muted)]">{skuLabel(device)}</span>
       </h1>
       <p className="mt-1 text-[13.5px] text-[var(--muted)]">
         What each programme pays in {MARKETS[market].name}, against what it sells for via{" "}
         {CHANNELS.find((c) => c.id === channel)!.label.toLowerCase()}.
       </p>
 
-      {/* selectors */}
+      {/* device: search or browse, never a wall of chips */}
+      <div className="mt-5">
+        <DevicePickerClient
+          base={process.env.NEXT_PUBLIC_BASE_PATH || ""}
+          current={{ id: device.id, label: fullLabel(device) }}
+          path="/compare"
+          carry={{ market, channel }}
+        />
+      </div>
+
       <div className="mt-5 flex flex-wrap gap-x-8 gap-y-3">
-        <Picker label="Device">
-          {devices.map((d) => (
-            <Chip key={d.id} href={link({ device: d.id })} on={d.id === deviceId}
-                  label={`${d.model} ${d.storageGb}`} />
-          ))}
-        </Picker>
         <Picker label="Market">
           {(Object.keys(MARKETS) as MarketCode[]).map((c) => (
             <Chip key={c} href={link({ market: c })} on={c === market} label={MARKETS[c].name} />
