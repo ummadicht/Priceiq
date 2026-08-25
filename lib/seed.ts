@@ -103,13 +103,60 @@ export function seeded(): boolean {
   return (db().prepare("SELECT count(*) c FROM programs").get() as { c: number }).c > 0;
 }
 
+/**
+ * Keep the programme registry in step with core/markets.ts.
+ *
+ * The registry is REFERENCE DATA owned by the code, not user data owned by the
+ * database — but `seed()` only ran against an empty table, so programmes added
+ * later never appeared. Twenty-four India programmes were written and nine were
+ * live, with nothing to indicate the gap.
+ *
+ * So descriptive fields are synced on every start: name, URL, cadence, note.
+ * Operational state is NOT — `cleared`, `authority`, `method` and `enabled`
+ * are decisions somebody made about a programme, and a deploy must never quietly
+ * re-clear something that was deliberately switched off, or un-clear one that
+ * was signed off.
+ */
+export function syncPrograms(): { added: number; updated: number } {
+  const d = db();
+  const existing = new Set(
+    (d.prepare("SELECT id FROM programs").all() as Array<{ id: string }>).map((r) => r.id)
+  );
+  const ins = d.prepare(
+    "INSERT INTO programs (id,name,market,kind,public_url,cadence_hours,cleared,authority,method,note) VALUES (?,?,?,?,?,?,0,'','',?)"
+  );
+  const upd = d.prepare(
+    "UPDATE programs SET name=?, market=?, kind=?, public_url=?, cadence_hours=?, note=? WHERE id=?"
+  );
+  const insLadder = d.prepare("INSERT OR IGNORE INTO ladders (program_id, rungs) VALUES (?,?)");
+
+  let added = 0, updated = 0;
+  d.transaction(() => {
+    for (const p of PROGRAM_SEEDS) {
+      if (existing.has(p.id)) {
+        upd.run(p.name, p.market, p.kind, p.publicUrl, p.cadenceHours, p.note || "", p.id);
+        updated++;
+      } else {
+        ins.run(p.id, p.name, p.market, p.kind, p.publicUrl, p.cadenceHours, p.note || "");
+        insLadder.run(p.id, JSON.stringify(ladderFor(p.kind)));
+        added++;
+      }
+    }
+  })();
+  return { added, updated };
+}
+
 export function seed(): { programs: number; devices: number; observations: number; marketPrices: number; runs: number } {
   const d = db();
-  if (seeded()) return counts();
+  if (seeded()) {
+    // Already seeded — but the registry may have grown since.
+    syncPrograms();
+    return counts();
+  }
   const r = rng(20260825);
 
   const insProgram = d.prepare(
-    "INSERT INTO programs (id,name,market,kind,public_url,cadence_hours,cleared,authority,method) VALUES (?,?,?,?,?,?,0,'','')"
+    "INSERT INTO programs (id,name,market,kind,public_url,cadence_hours,cleared,authority,method,note) VALUES (?,?,?,?,?,?,0,'','',?)"
   );
   const insLadder = d.prepare("INSERT INTO ladders (program_id, rungs) VALUES (?,?)");
   const insDevice = d.prepare("INSERT INTO devices (id,brand,model,storage_gb,release_year,aliases) VALUES (?,?,?,?,?,?)");
@@ -143,7 +190,7 @@ export function seed(): { programs: number; devices: number; observations: numbe
     }
 
     for (const p of PROGRAM_SEEDS) {
-      insProgram.run(p.id, p.name, p.market, p.kind, p.publicUrl, p.cadenceHours);
+      insProgram.run(p.id, p.name, p.market, p.kind, p.publicUrl, p.cadenceHours, p.note || "");
       const rungs = ladderFor(p.kind);
       insLadder.run(p.id, JSON.stringify(rungs));
 

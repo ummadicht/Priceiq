@@ -39,6 +39,7 @@ function init(): Database.Database {
       authority     TEXT NOT NULL DEFAULT '',
       method        TEXT NOT NULL DEFAULT '',
       enabled       INTEGER NOT NULL DEFAULT 1,
+      note          TEXT NOT NULL DEFAULT '',
       created_at    TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -185,6 +186,7 @@ function migrate(db: Database.Database) {
   const need: Array<[string, string, string]> = [
     ["market_prices", "entered_by", "ALTER TABLE market_prices ADD COLUMN entered_by TEXT NOT NULL DEFAULT ''"],
     ["market_prices", "week", "ALTER TABLE market_prices ADD COLUMN week TEXT NOT NULL DEFAULT ''"],
+    ["programs", "note", "ALTER TABLE programs ADD COLUMN note TEXT NOT NULL DEFAULT ''"],
   ];
   for (const [table, column, stmt] of need) {
     const cols = new Set(

@@ -19,7 +19,7 @@ import { CHANNELS, type Channel, type MarketPrice } from "../core/channel.ts";
 export type ProgramRow = {
   id: string; name: string; market: MarketCode; kind: string;
   publicUrl: string; cadenceHours: number;
-  cleared: boolean; authority: string; enabled: boolean;
+  cleared: boolean; authority: string; enabled: boolean; note: string;
   priceCount: number;
   lastChangeAt: string | null;
   lastChangeAgo: string;
@@ -81,6 +81,7 @@ export function listPrograms(market?: MarketCode): ProgramRow[] {
       id, name: String(p.name), market: String(p.market) as MarketCode, kind: String(p.kind),
       publicUrl: String(p.public_url || ""), cadenceHours: cadence,
       cleared: !!p.cleared, authority: String(p.authority || ""), enabled: !!p.enabled,
+      note: String(p.note || ""),
       priceCount,
       lastChangeAt: latest,
       lastChangeAgo: since(latest),

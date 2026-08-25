@@ -22,6 +22,32 @@ t("every programme belongs to one of those three markets", () => {
   assert.ok(programsIn("AE").length >= 5);
   assert.ok(programsIn("IN").length >= 5);
 });
+t("INDIA IS THE DEEPEST LIST — that fragmentation is why it was scoped in", () => {
+  // The US is a handful of carriers and two OEMs. India has OEMs, marketplace
+  // exchange flows, national chains and a deep bench of recyclers all quoting
+  // the same handset. If India ever stops being the longest list, something has
+  // been dropped rather than the market having consolidated.
+  const counts = { US: programsIn("US").length, AE: programsIn("AE").length, IN: programsIn("IN").length };
+  assert.ok(counts.IN > counts.US, `India ${counts.IN} vs US ${counts.US}`);
+  assert.ok(counts.IN > counts.AE, `India ${counts.IN} vs UAE ${counts.AE}`);
+  assert.ok(counts.IN >= 20, `India has only ${counts.IN} programmes`);
+});
+
+t("every kind of counterparty is represented in India", () => {
+  const kinds = new Set(programsIn("IN").map((p) => p.kind));
+  for (const k of ["oem", "retailer", "recycler", "marketplace"]) {
+    assert.ok(kinds.has(k), `India has no ${k} programme`);
+  }
+});
+
+t("a marketplace carries a note saying it is NOT a trade-in quote", () => {
+  // OLX asking prices and a recycler's offer are different animals; recording
+  // them as the same thing would poison every comparison they appear in.
+  const olx = programsIn("IN").find((p) => p.kind === "marketplace");
+  assert.ok(olx, "no marketplace in India");
+  assert.match(olx.note || "", /not a trade-in quote/i);
+});
+
 t("programme ids are unique", () => {
   const ids = PROGRAM_SEEDS.map((p) => p.id);
   assert.equal(new Set(ids).size, ids.length);

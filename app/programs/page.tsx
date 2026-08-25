@@ -82,6 +82,14 @@ export default async function Programs({ searchParams }: { searchParams: Promise
               </div>
             </div>
 
+            {p.note && (
+              // Known collection difficulty, before anyone spends a day on it.
+              <p className="mt-2.5 border-l-2 pl-2 text-[11.5px] leading-snug text-[var(--muted)]"
+                 style={{ borderColor: "var(--gold-2)" }}>
+                {p.note}
+              </p>
+            )}
+
             <div className="mt-3 flex items-center justify-between text-[12px]">
               <a href={p.publicUrl} target="_blank" rel="noreferrer" className="font-semibold text-[var(--brand)]">
                 Public page ↗

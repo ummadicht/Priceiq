@@ -54,6 +54,16 @@ export type ProgramSeed = {
    * collection.ts for why this is a hard gate rather than a note.
    */
   cleared: boolean;
+  /**
+   * What is known about getting prices out of this one.
+   *
+   * Worth carrying because collection difficulty is wildly uneven and knowing
+   * it in advance changes what you attempt first. A quote page that renders a
+   * price from a URL is an afternoon; a marketplace exchange flow that only
+   * reveals its offer inside a logged-in cart may never be automatable at all,
+   * and is a manual-entry candidate from day one.
+   */
+  note?: string;
 };
 
 /**
@@ -85,16 +95,48 @@ export const PROGRAM_SEEDS: ProgramSeed[] = [
   { id: "cashify-ae",    name: "Cashify UAE",           market: "AE", kind: "recycler",    publicUrl: "https://www.cashify.ae/",                   cadenceHours: 48, cleared: false },
   { id: "etisalat-ae",   name: "e& Device Trade-In",    market: "AE", kind: "carrier",     publicUrl: "https://www.etisalat.ae/",                  cadenceHours: 48, cleared: false },
 
-  // ── India ───────────────────────────────────────────────────────────────
+  // ── India ──────────────────────────────────────────────────────────────
+  //
+  // The most fragmented of the three markets by a wide margin, which is why it
+  // was worth scoping to. The US is a handful of carriers and two OEMs; India
+  // has OEM programmes, marketplace exchange flows, national electronics
+  // chains, and a genuinely deep bench of independent recyclers all quoting the
+  // same handset on the same day. That spread is the product's whole reason to
+  // exist here — and it is also why the India list will keep growing.
+  //
+  // EVERY ENTRY BELOW STILL NEEDS VERIFYING. Some are certain; some are from
+  // market knowledge that may be out of date, because Indian recyclers
+  // consolidate and rebrand quickly (Yaantra was acquired; ReGlobe became
+  // Cashify). Confirm the programme still runs and still quotes publicly before
+  // clearing any of them.
   { id: "apple-in",      name: "Apple Trade In India",  market: "IN", kind: "oem",         publicUrl: "https://www.apple.com/in/shop/trade-in",    cadenceHours: 48, cleared: false },
   { id: "samsung-in",    name: "Samsung India Upgrade", market: "IN", kind: "oem",         publicUrl: "https://www.samsung.com/in/",               cadenceHours: 48, cleared: false },
-  { id: "cashify-in",    name: "Cashify India",         market: "IN", kind: "recycler",    publicUrl: "https://www.cashify.in/",                   cadenceHours: 24, cleared: false },
+  { id: "google-in",     name: "Google Store India",    market: "IN", kind: "oem",         publicUrl: "https://store.google.com/in/",              cadenceHours: 48, cleared: false },
+  { id: "xiaomi-in",     name: "Mi/Xiaomi Exchange",    market: "IN", kind: "oem",         publicUrl: "https://www.mi.com/in/",                    cadenceHours: 48, cleared: false },
+  { id: "oneplus-in",    name: "OnePlus Trade-In",      market: "IN", kind: "oem",         publicUrl: "https://www.oneplus.in/",                   cadenceHours: 48, cleared: false },
+  { id: "vivo-in",       name: "vivo Trade-In",         market: "IN", kind: "oem",         publicUrl: "https://www.vivo.com/in",                   cadenceHours: 48, cleared: false },
+  { id: "oppo-in",       name: "OPPO Trade-In",         market: "IN", kind: "oem",         publicUrl: "https://www.oppo.com/in/",                  cadenceHours: 48, cleared: false },
+  { id: "realme-in",     name: "realme Trade-In",       market: "IN", kind: "oem",         publicUrl: "https://www.realme.com/in/",                cadenceHours: 48, cleared: false },
+
+  { id: "cashify-in",    name: "Cashify India",         market: "IN", kind: "recycler",    publicUrl: "https://www.cashify.in/",                   cadenceHours: 24, cleared: false, note: "Quotes from a public flow; the most-referenced price in the market." },
+  { id: "cashkr-in",     name: "Cashkr",                market: "IN", kind: "recycler",    publicUrl: "https://www.cashkr.com/",                   cadenceHours: 48, cleared: false },
   { id: "budli-in",      name: "Budli",                 market: "IN", kind: "recycler",    publicUrl: "https://www.budli.in/",                     cadenceHours: 48, cleared: false },
   { id: "instacash-in",  name: "InstaCash (MobiKwik)",  market: "IN", kind: "recycler",    publicUrl: "https://www.instacash.co.in/",              cadenceHours: 48, cleared: false },
-  { id: "amazon-in",     name: "Amazon India Exchange", market: "IN", kind: "retailer",    publicUrl: "https://www.amazon.in/",                    cadenceHours: 48, cleared: false },
-  { id: "flipkart-in",   name: "Flipkart Exchange",     market: "IN", kind: "retailer",    publicUrl: "https://www.flipkart.com/",                 cadenceHours: 48, cleared: false },
+  { id: "yaantra-in",    name: "Yaantra Phonecash",     market: "IN", kind: "recycler",    publicUrl: "https://www.yaantra.com/",                  cadenceHours: 48, cleared: false, note: "Acquired — confirm the programme still runs before clearing." },
+  { id: "togofogo-in",   name: "Togofogo",              market: "IN", kind: "recycler",    publicUrl: "https://www.togofogo.com/",                 cadenceHours: 48, cleared: false },
+  { id: "servify-in",    name: "Servify Trade-In",      market: "IN", kind: "recycler",    publicUrl: "https://www.servify.in/",                   cadenceHours: 48, cleared: false, note: "Powers several OEM programmes — its price may BE another programme's price. Check for double-counting." },
+
+  { id: "amazon-in",     name: "Amazon India Exchange", market: "IN", kind: "retailer",    publicUrl: "https://www.amazon.in/",                    cadenceHours: 48, cleared: false, note: "Exchange offer only appears inside a signed-in cart. Manual entry is the realistic path." },
+  { id: "flipkart-in",   name: "Flipkart Exchange",     market: "IN", kind: "retailer",    publicUrl: "https://www.flipkart.com/",                 cadenceHours: 48, cleared: false, note: "Same shape as Amazon — offer is revealed in the buy flow, not on a quote page." },
   { id: "croma-in",      name: "Croma Exchange",        market: "IN", kind: "retailer",    publicUrl: "https://www.croma.com/",                    cadenceHours: 48, cleared: false },
   { id: "reliance-in",   name: "Reliance Digital",      market: "IN", kind: "retailer",    publicUrl: "https://www.reliancedigital.in/",           cadenceHours: 48, cleared: false },
+  { id: "istore-in",     name: "India iStore",          market: "IN", kind: "retailer",    publicUrl: "https://www.imagineonline.store/",          cadenceHours: 48, cleared: false, note: "Apple premium reseller; its trade-in usually mirrors Apple India's." },
+  { id: "vijaysales-in", name: "Vijay Sales",           market: "IN", kind: "retailer",    publicUrl: "https://www.vijaysales.com/",               cadenceHours: 48, cleared: false },
+  { id: "poorvika-in",   name: "Poorvika Mobiles",      market: "IN", kind: "retailer",    publicUrl: "https://www.poorvika.com/",                 cadenceHours: 48, cleared: false },
+  { id: "sangeetha-in",  name: "Sangeetha Mobiles",     market: "IN", kind: "retailer",    publicUrl: "https://www.sangeethamobiles.com/",         cadenceHours: 48, cleared: false },
+  { id: "tatacliq-in",   name: "Tata CLiQ Exchange",    market: "IN", kind: "retailer",    publicUrl: "https://www.tatacliq.com/",                 cadenceHours: 48, cleared: false },
+
+  { id: "olx-in",        name: "OLX India",             market: "IN", kind: "marketplace", publicUrl: "https://www.olx.in/",                       cadenceHours: 48, cleared: false, note: "Peer-to-peer asking prices, NOT a trade-in quote. Different thing — treat as market signal, never as a programme offer." },
 ];
 
 export function programsIn(market: MarketCode): ProgramSeed[] {
