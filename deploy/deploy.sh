@@ -52,27 +52,10 @@ rsync -az --delete \
 echo "[4/7] runtime deps"
 $SSH "$VM" "cd $DIR && npm install --omit=dev --no-audit --no-fund 2>&1 | tail -2"
 
-echo "[5/7] session secret — copied from the ERP, never printed"
-# Read the ERP's own session secret out of its control database and write it to
-# a root-only env file OUTSIDE the app directory, because step 3 rsyncs with
-# --delete and a secret inside the app dir would vanish on the next deploy.
-$SSH "$VM" "
-  SECRET=\$(cd $ERP_DIR && node -e '
-    const D=require(\"better-sqlite3\");
-    const db=new D(require(\"path\").join(process.cwd(),\"data\",\"control.db\"),{readonly:true});
-    const r=db.prepare(\"SELECT data FROM kv WHERE key = ?\").get(\"session-secret\");
-    if(!r){process.stderr.write(\"no session-secret in control.db\\n\");process.exit(1);}
-    process.stdout.write(JSON.parse(r.data));
-  ')
-  if [ -z \"\$SECRET\" ]; then echo '  ERROR: could not read the ERP session secret' >&2; exit 1; fi
-  sudo sh -c \"umask 077; { printf 'SUPERIQ_SESSION_SECRET=%s\n' '\$SECRET'; \
-     printf 'SUPERIQ_LOGIN_URL=https://wholecellmarket.com/login\n'; \
-     printf 'NEXT_PUBLIC_BASE_PATH=$BASE\n'; \
-     printf 'NODE_ENV=production\n'; \
-     printf 'PORT=$PORT\n'; } > /etc/priceiq.env\"
-  sudo chown root:ammar /etc/priceiq.env; sudo chmod 640 /etc/priceiq.env
-  echo \"  secret installed (\$(sudo wc -c < /etc/priceiq.env) bytes, mode \$(sudo stat -c %a /etc/priceiq.env))\"
-"
+echo "[5/7] environment — session secret from the ERP, token key preserved"
+# A real script, copied over and run. See deploy/provision-env.sh.
+scp -q -i "$KEY" deploy/provision-env.sh "$VM:/tmp/provision-env.sh"
+$SSH "$VM" "chmod +x /tmp/provision-env.sh && /tmp/provision-env.sh $ERP_DIR $BASE $PORT"
 
 echo "[6/7] pm2 restart on :$PORT"
 $SSH "$VM" "cd $DIR && \

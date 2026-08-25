@@ -2,6 +2,8 @@ import { NextRequest } from "next/server";
 import { currentUserId, authDisabled } from "./superiqAuth.ts";
 import { verifyKey } from "./apikeys.ts";
 import { keyFromHeader, permits, type Scope } from "../core/apikey.ts";
+import { verifyToken } from "../core/oauth.ts";
+import { tokenSigningSecret } from "./oauthClients.ts";
 
 /**
  * One gate, two credentials.
@@ -14,12 +16,32 @@ import { keyFromHeader, permits, type Scope } from "../core/apikey.ts";
  * A signed-in human implicitly holds both scopes: they can already do anything
  * through the UI, so pretending otherwise at the API boundary would be theatre.
  */
-export type Actor = { kind: "user" | "key"; id: string; label: string; scopes: Scope[] };
+export type Actor = { kind: "user" | "key" | "client"; id: string; label: string; scopes: Scope[] };
 
 export async function authenticate(req: NextRequest, needed: Scope): Promise<
   { ok: true; actor: Actor } | { ok: false; status: number; why: string }
 > {
-  const presented = keyFromHeader(req.headers.get("authorization"));
+  const authHeader = req.headers.get("authorization");
+
+  /* An OAuth access token, tried FIRST.
+   *
+   * Both credentials arrive as `Bearer …`, so the order matters: a token is
+   * distinguished by verifying, not by its shape, and checking it first means a
+   * bot's short-lived token never falls through to the static-key path and
+   * comes back as "not a valid API key". */
+  const bearer = /^Bearer\s+(\S+)$/i.exec((authHeader || "").trim())?.[1];
+  if (bearer && !bearer.startsWith("pk_live_")) {
+    const claims = verifyToken(bearer, tokenSigningSecret());
+    if (claims) {
+      if (!permits(claims.scopes, needed)) {
+        return { ok: false, status: 403, why: `this token does not have "${needed}" scope` };
+      }
+      return { ok: true, actor: { kind: "client", id: claims.sub, label: `client:${claims.sub}`, scopes: claims.scopes } };
+    }
+    return { ok: false, status: 401, why: "that access token is invalid or has expired — request a new one from /api/oauth/token" };
+  }
+
+  const presented = keyFromHeader(authHeader);
   if (presented) {
     const k = verifyKey(presented);
     if (!k) return { ok: false, status: 401, why: "that API key is not valid or has been revoked" };

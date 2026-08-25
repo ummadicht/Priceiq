@@ -127,6 +127,19 @@ function init(): Database.Database {
     );
     CREATE INDEX IF NOT EXISTS idx_entries ON entries(kind, created_at);
 
+    -- OAuth 2.0 clients (client_credentials grant). Only the secret HASH is
+    -- stored; access tokens are signed, never persisted — see core/oauth.ts.
+    CREATE TABLE IF NOT EXISTS oauth_clients (
+      client_id    TEXT PRIMARY KEY,
+      name         TEXT NOT NULL DEFAULT '',
+      secret_hash  TEXT NOT NULL,
+      scopes       TEXT NOT NULL DEFAULT '[]',
+      created_by   TEXT NOT NULL DEFAULT '',
+      created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      last_used_at TEXT,
+      revoked_at   TEXT
+    );
+
     -- API keys. Only the SHA-256 is stored — see core/apikey.ts.
     CREATE TABLE IF NOT EXISTS api_keys (
       id          TEXT PRIMARY KEY,
