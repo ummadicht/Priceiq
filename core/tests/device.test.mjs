@@ -41,6 +41,19 @@ t("a UNIT-LESS capacity is read, a unit-less model number is not", () => {
   assert.equal(parseStorageGb("Pixel 8 Pro"), null);
 });
 
+t("A MODEL NUMBER IS NEVER READ AS A CAPACITY", () => {
+  // This shipped: 16 was in the capacity set, so "iPhone 16 Pro Max" parsed as
+  // a 16GB device and every iPhone 16 listing without storage resolved to a
+  // variant that does not exist.
+  assert.equal(parseStorageGb("iPhone 16 Pro Max"), null);
+  assert.equal(parseStorageGb("iPhone 16"), null);
+  assert.equal(parseStorageGb("Galaxy S24"), null);
+  // ...and the trailing number still wins when it IS a capacity.
+  assert.equal(parseStorageGb("iPhone 16 Pro Max 512"), 512);
+  assert.equal(parseStorageGb("iPhone 16 Pro 128"), 128);
+  assert.equal(parseStorageGb("iPhone 16 Pro Max 1TB"), 1024);
+});
+
 console.log("\ntokenising");
 t("a closed-up name still splits", () => {
   assert.ok(tokenise("iPhone15 Pro Max").includes("iphone"));

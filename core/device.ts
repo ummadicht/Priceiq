@@ -58,16 +58,25 @@ const NOISE = new Set([
 ]);
 
 /**
- * Capacities that actually ship. Used to read a UNIT-LESS number as storage.
+ * Capacities that actually ship, used to read a UNIT-LESS number as storage.
  *
- * Plenty of programs list "IPHONE 15 PRO MAX 512" with no GB anywhere, and
- * refusing to read that costs real matches. But a bare number is dangerous —
- * the 15 in "iPhone 15" is a model, not a capacity — so only numbers from this
- * set are eligible. No mainstream handset is NAMED 128, 256, 512 or 1024, which
- * is the assumption that makes this safe; the moment one is, it belongs in a
- * per-brand exclusion rather than being read as storage.
+ * Plenty of programmes list "IPHONE 15 PRO MAX 512" with no GB anywhere, and
+ * refusing to read that costs real matches. But a bare number is dangerous,
+ * and this set was originally wrong in a way that shipped:
+ *
+ *   16 AND 32 WERE IN IT. "iPhone 16 Pro Max" then parsed as a 16GB device —
+ *   the model number read as a capacity — so every iPhone 16 listing without
+ *   explicit storage resolved to a variant that does not exist. Apple named a
+ *   phone after a number that used to be a storage size, and the assumption
+ *   that "no handset is NAMED 128 or 256" quietly stopped holding at the low
+ *   end. Both are dropped: no current handset ships 16GB or 32GB, so nothing
+ *   is lost, and iPhone 32 would break this again if it ever exists.
+ *
+ * The scan also takes the LAST capacity in the string rather than the first,
+ * because storage trails the model name — "iPhone 16 Pro Max 512" must be a
+ * 512, not whatever number appears earliest.
  */
-const CAPACITIES = new Set([16, 32, 64, 128, 256, 512, 1024, 2048]);
+const CAPACITIES = new Set([64, 128, 256, 512, 1024, 2048]);
 
 /** "512gb" / "512 gb" / "1tb" / a bare "512" → gigabytes. */
 export function parseStorageGb(raw: string): number | null {
@@ -77,13 +86,14 @@ export function parseStorageGb(raw: string): number | null {
   const gb = /(\d+)\s*gb\b/.exec(s);
   if (gb) return parseInt(gb[1], 10);
 
-  // Unit-less fallback, capacity set only. Scans every number rather than just
-  // the last, since "512 iPhone 15 Pro Max" is a listing shape too.
+  // Unit-less fallback, capacity set only, LAST match wins — storage follows
+  // the model name, so the trailing number is the candidate.
+  let found: number | null = null;
   for (const m of s.matchAll(/\b(\d{2,4})\b/g)) {
     const n = parseInt(m[1], 10);
-    if (CAPACITIES.has(n)) return n;
+    if (CAPACITIES.has(n)) found = n;
   }
-  return null;
+  return found;
 }
 
 /**

@@ -121,6 +121,20 @@ function init(): Database.Database {
     );
     CREATE INDEX IF NOT EXISTS idx_entries ON entries(kind, created_at);
 
+    -- API keys. Only the SHA-256 is stored — see core/apikey.ts.
+    CREATE TABLE IF NOT EXISTS api_keys (
+      id          TEXT PRIMARY KEY,
+      name        TEXT NOT NULL DEFAULT '',
+      hash        TEXT NOT NULL UNIQUE,
+      display     TEXT NOT NULL DEFAULT '',
+      scopes      TEXT NOT NULL DEFAULT '[]',
+      created_by  TEXT NOT NULL DEFAULT '',
+      created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      last_used_at TEXT,
+      revoked_at  TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_keys ON api_keys(hash);
+
     CREATE TABLE IF NOT EXISTS runs (
       id          TEXT PRIMARY KEY,
       program_id  TEXT NOT NULL,
