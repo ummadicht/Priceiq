@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { seed } from "@/lib/seed.ts";
+import { requireSuperIQ } from "@/lib/guard.ts";
 import { listDevices } from "@/lib/repo.ts";
 import SeedBanner from "../banner";
 
 export const dynamic = "force-dynamic";
 
-export default function Devices() {
+export default async function Devices() {
+  await requireSuperIQ("/priceiq/devices");
   seed();
   const devices = listDevices();
   return (

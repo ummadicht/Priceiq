@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { seed } from "@/lib/seed.ts";
+import { requireSuperIQ } from "@/lib/guard.ts";
 import { listPrograms, listDevices, quarantineCount } from "@/lib/repo.ts";
 import { MARKETS, type MarketCode } from "@/core/markets.ts";
 import SeedBanner from "./banner";
@@ -7,7 +8,8 @@ import { SUITE_ENGINES, PRODUCT, SUITE } from "@/lib/brand.ts";
 
 export const dynamic = "force-dynamic";
 
-export default function Overview() {
+export default async function Overview() {
+  await requireSuperIQ("/priceiq");
   seed();
   const programs = listPrograms();
   const devices = listDevices();

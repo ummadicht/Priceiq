@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { seed } from "@/lib/seed.ts";
+import { requireSuperIQ } from "@/lib/guard.ts";
 import { compareDevice, listDevices } from "@/lib/repo.ts";
 import { MARKETS, type MarketCode } from "@/core/markets.ts";
 import { CHANNELS, type Channel } from "@/core/channel.ts";
@@ -31,6 +32,7 @@ export default async function Compare({
 }: {
   searchParams: Promise<{ device?: string; market?: string; channel?: string }>;
 }) {
+  await requireSuperIQ("/priceiq/compare");
   seed();
   const sp = await searchParams;
   const devices = listDevices();

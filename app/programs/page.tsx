@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { seed } from "@/lib/seed.ts";
+import { requireSuperIQ } from "@/lib/guard.ts";
 import { listPrograms } from "@/lib/repo.ts";
 import { MARKETS, type MarketCode } from "@/core/markets.ts";
 import { describeSpan } from "@/core/condition.ts";
@@ -8,6 +9,7 @@ import SeedBanner from "../banner";
 export const dynamic = "force-dynamic";
 
 export default async function Programs({ searchParams }: { searchParams: Promise<{ market?: string }> }) {
+  await requireSuperIQ("/priceiq/programs");
   seed();
   const sp = await searchParams;
   const market = (sp.market as MarketCode) || undefined;
