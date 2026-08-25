@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { seed } from "@/lib/seed.ts";
 import { requireSuperIQ } from "@/lib/guard.ts";
-import { compareDevice, listDevices, coverageFor, busiestDeviceId, rateInForce } from "@/lib/repo.ts";
+import { compareDevice, listDevices, coverageFor, busiestDeviceId, busiestMarket, rateInForce } from "@/lib/repo.ts";
 import { convert } from "@/core/money.ts";
 import { fxRates } from "@/lib/repo.ts";
 import { fullLabel, skuLabel } from "@/core/search.ts";
@@ -47,7 +47,12 @@ export default async function Compare({
     // Landing on devices[0] meant landing alphabetically — out of 2,566, almost
     // always on something with no data at all.
     : (busiestDeviceId() ?? devices[0].id);
-  const market = (sp.market && MARKETS[sp.market as MarketCode] ? sp.market : "US") as MarketCode;
+  /* Default to a market that HAS data rather than a hardcoded "US".
+     With the example dataset purged, the US and UAE hold nothing, so the old
+     default opened on an empty screen for every device. */
+  const market = (sp.market && MARKETS[sp.market as MarketCode]
+    ? sp.market
+    : (busiestMarket() ?? "US")) as MarketCode;
   const channel = (sp.channel && CHANNELS.some((c) => c.id === sp.channel) ? sp.channel : "wholesale") as Channel;
 
   const device = devices.find((d) => d.id === deviceId)!;

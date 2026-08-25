@@ -4,20 +4,21 @@ import { spanOf, type LadderRung } from "../core/condition.ts";
 import { CHANNELS, type Channel } from "../core/channel.ts";
 
 /**
- * A WORKED EXAMPLE DATASET — explicitly not observed prices.
+ * EXAMPLE DATA — OFF BY DEFAULT.
  *
- * Nothing in core/markets.ts is cleared for collection, so the application has
- * no real data by design. Rather than show empty screens, this seeds a
- * consistent illustrative dataset so the whole pipeline can be exercised and
- * demonstrated end to end.
+ * This existed so empty screens could still demonstrate the pipeline. It has
+ * now served its purpose and outlived it: with 17,906 real Indian prices in the
+ * database, every invented figure beside them is a liability. A comparison that
+ * silently mixes a measured price with a generated one is worse than a
+ * comparison with a gap in it, because the gap is visible.
  *
- * Every seeded figure is stamped `source: "worked example"` and the UI says so
- * on every screen that shows a number. That labelling is not decoration: a
- * price-intelligence product whose demo data is indistinguishable from its real
- * data is one screenshot away from someone trading on a figure nobody observed.
+ * So it only runs when PRICEIQ_EXAMPLE_DATA=1 is set, and nothing sets it in
+ * production. The PROGRAMME REGISTRY still syncs on every start — that is
+ * reference data describing real programmes, not invented prices.
  *
- * The numbers are deterministic — same seed, same dataset — so screenshots and
- * tests stay stable.
+ * If it is ever switched on again the numbers stay deterministic (same seed,
+ * same dataset) and every row is still stamped `worked example`, which is what
+ * makes purging them afterwards possible.
  */
 
 export const SEED_SOURCE = "worked example";
@@ -99,8 +100,16 @@ const FX = [
 const iso = (d: Date) => d.toISOString();
 const day = (back: number) => new Date(Date.UTC(2026, 7, 25) - back * 86400000);
 
+/**
+ * Has example DATA been generated?
+ *
+ * Checks for example runs, not for programmes. The programme registry is
+ * reference data and now syncs on every start, so a programme count is always
+ * non-zero and would have made this permanently true — quietly disabling the
+ * flag it guards.
+ */
 export function seeded(): boolean {
-  return (db().prepare("SELECT count(*) c FROM programs").get() as { c: number }).c > 0;
+  return (db().prepare("SELECT count(*) c FROM runs WHERE note = ?").get(SEED_SOURCE) as { c: number }).c > 0;
 }
 
 /**
@@ -146,13 +155,20 @@ export function syncPrograms(): { added: number; updated: number } {
   return { added, updated };
 }
 
+/** Example prices are opt-in. Nothing in production sets this. */
+export function exampleDataEnabled(): boolean {
+  return process.env.PRICEIQ_EXAMPLE_DATA === "1";
+}
+
 export function seed(): { programs: number; devices: number; observations: number; marketPrices: number; runs: number } {
   const d = db();
-  if (seeded()) {
-    // Already seeded — but the registry may have grown since.
-    syncPrograms();
-    return counts();
-  }
+
+  // Reference data always. It describes real programmes and costs nothing to
+  // keep current; the prices are the part that had to go.
+  syncPrograms();
+
+  if (!exampleDataEnabled()) return counts();
+  if (seeded()) return counts();
   const r = rng(20260825);
 
   const insProgram = d.prepare(

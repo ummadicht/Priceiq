@@ -315,3 +315,12 @@ export function busiestDeviceId(): string | null {
   ).get() as { device_id: string } | undefined;
   return r?.device_id ?? null;
 }
+
+/** The market holding the most observed prices — where the compare page opens. */
+export function busiestMarket(): MarketCode | null {
+  const r = db().prepare(
+    `SELECT p.market, count(*) n FROM observations o JOIN programs p ON p.id = o.program_id
+      WHERE o.amount_minor IS NOT NULL GROUP BY p.market ORDER BY n DESC LIMIT 1`
+  ).get() as { market: MarketCode } | undefined;
+  return r?.market ?? null;
+}
