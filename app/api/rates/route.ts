@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticate } from "@/lib/apiAuth.ts";
 import { setRate, rateInForce } from "@/lib/repo.ts";
-import { db } from "@/lib/db.ts";
+import { db, query } from "@/lib/db.ts";
 import { seed } from "@/lib/seed.ts";
 
 export const dynamic = "force-dynamic";
@@ -30,10 +30,10 @@ export async function GET(req: NextRequest) {
       rate: rateInForce(base.toUpperCase(), quote.toUpperCase(), q.get("on") || new Date().toISOString()),
     });
   }
-  const rows = db().prepare(
+  const rows = await query<Record<string, unknown>>(
     `SELECT base, quote, rate, as_of, source FROM fx_rates
       ORDER BY as_of DESC, base, quote LIMIT 200`
-  ).all() as Array<Record<string, unknown>>;
+  );
   return NextResponse.json({ rates: rows });
 }
 

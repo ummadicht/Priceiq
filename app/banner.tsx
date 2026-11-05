@@ -1,5 +1,5 @@
 import { provenance } from "@/lib/provenance.ts";
-import { db } from "@/lib/db.ts";
+import { db, queryOne } from "@/lib/db.ts";
 
 /**
  * Shown on every screen that displays a number.
@@ -11,9 +11,15 @@ import { db } from "@/lib/db.ts";
  * What remains is the gap that IS real: plenty of trade-in prices, almost no
  * market prices, so most comparisons have only one side.
  */
-export default function SeedBanner() {
+export default async function SeedBanner() {
   const p = provenance();
-  const sell = (db().prepare("SELECT count(*) c FROM market_prices").get() as { c: number }).c;
+  let sell = 0;
+  try {
+    const row = await queryOne<{ c: number }>("SELECT count(*) c FROM market_prices");
+    sell = Number(row?.c || 0);
+  } catch {
+    sell = (db().prepare("SELECT count(*) c FROM market_prices").get() as { c: number }).c;
+  }
 
   if (p.realObservations === 0) {
     return (

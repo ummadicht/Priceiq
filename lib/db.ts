@@ -1,23 +1,187 @@
 import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
+import { Pool, PoolClient } from "pg";
 
 /**
- * Persistence. The schema follows the shapes in core/, never the other way
- * round — the domain was built and tested without a database precisely so the
- * storage layer could be a detail rather than the design.
+ * Persistence layer for PriceIQ.
  *
- * Three things are stored that a naive schema would throw away, and each is
- * load-bearing:
- *
- *   • Every observation, including CONFIRMATIONS. "Last change" is derived from
- *     the series, not stored as a field, so it can never drift from the data.
- *   • The FX rate that priced each conversion, with its date, so a number
- *     screenshotted last week can still be reproduced.
- *   • Quarantined rows, in full. They are the catalogue's to-do list.
+ * Supports both PostgreSQL (targeting schema 'price_iq') and SQLite (for offline/standalone).
+ * When running in production or when DATABASE_URL / PGHOST is provided, all queries target
+ * PostgreSQL with search_path set to 'price_iq, public'.
  */
 
-const g = globalThis as unknown as { __tm_db?: Database.Database };
+const g = globalThis as unknown as {
+  __tm_db?: Database.Database;
+  __tm_pg_pool?: Pool;
+};
+
+/**
+ * Check whether PostgreSQL is enabled via environment variables.
+ */
+export function isPostgresEnabled(): boolean {
+  return (
+    process.env.USE_POSTGRES === "1" ||
+    process.env.USE_POSTGRES === "true" ||
+    !!process.env.DATABASE_URL ||
+    !!process.env.PGHOST ||
+    process.env.NODE_ENV === "production"
+  );
+}
+
+/**
+ * Get or initialize the PostgreSQL connection pool.
+ * Schema search_path is explicitly set to 'price_iq, public'.
+ */
+export function getPgPool(): Pool {
+  if (!g.__tm_pg_pool) {
+    const connectionString = process.env.DATABASE_URL;
+    const schema = process.env.PGSCHEMA || "price_iq";
+
+    if (connectionString) {
+      g.__tm_pg_pool = new Pool({
+        connectionString,
+        options: `-c search_path=${schema},public`,
+      });
+    } else {
+      g.__tm_pg_pool = new Pool({
+        host: process.env.PGHOST || "127.0.0.1",
+        port: Number(process.env.PGPORT) || 5432,
+        database: process.env.PGDATABASE || "scrapingdb",
+        user: process.env.PGUSER || "scraper_user",
+        password: process.env.PGPASSWORD || "",
+        options: `-c search_path=${schema},public`,
+      });
+    }
+
+    g.__tm_pg_pool.on("error", (err) => {
+      console.error("[PriceIQ PostgreSQL Pool Error]", err);
+    });
+  }
+  return g.__tm_pg_pool;
+}
+
+/**
+ * Convert standard SQLite query strings (? or @param) and functions into PostgreSQL format ($1, $2, ...).
+ */
+export function toPgSql(
+  sql: string,
+  params?: unknown[] | Record<string, unknown>
+): { text: string; values: unknown[] } {
+  let text = sql
+    .replace(/datetime\('now'\)/gi, "CURRENT_TIMESTAMP")
+    .replace(/\bAUTOINCREMENT\b/gi, "");
+
+  const values: unknown[] = [];
+
+  if (Array.isArray(params)) {
+    let index = 1;
+    text = text.replace(/\?/g, () => `$${index++}`);
+    values.push(...params);
+  } else if (params && typeof params === "object") {
+    let index = 1;
+    const nameMap = new Map<string, number>();
+    text = text.replace(/@([a-zA-Z0-9_]+)/g, (_, name) => {
+      if (!nameMap.has(name)) {
+        nameMap.set(name, index++);
+        values.push((params as Record<string, unknown>)[name]);
+      }
+      return `$${nameMap.get(name)}`;
+    });
+  }
+
+  return { text, values };
+}
+
+/**
+ * Async query for multiple rows.
+ * Queries PostgreSQL if enabled, otherwise falls back to SQLite.
+ */
+export async function query<T = Record<string, unknown>>(
+  sql: string,
+  params?: unknown[] | Record<string, unknown>
+): Promise<T[]> {
+  if (isPostgresEnabled()) {
+    try {
+      const { text, values } = toPgSql(sql, params);
+      const pool = getPgPool();
+      const res = await pool.query(text, values);
+      return res.rows as T[];
+    } catch (err) {
+      console.error("[PostgreSQL query error, falling back to SQLite if available]", err);
+      if (!g.__tm_db) throw err;
+    }
+  }
+
+  const stmt = db().prepare(sql);
+  if (Array.isArray(params)) {
+    return stmt.all(...params) as T[];
+  } else if (params) {
+    return stmt.all(params) as T[];
+  }
+  return stmt.all() as T[];
+}
+
+/**
+ * Async query for a single row.
+ * Queries PostgreSQL if enabled, otherwise falls back to SQLite.
+ */
+export async function queryOne<T = Record<string, unknown>>(
+  sql: string,
+  params?: unknown[] | Record<string, unknown>
+): Promise<T | null> {
+  if (isPostgresEnabled()) {
+    try {
+      const { text, values } = toPgSql(sql, params);
+      const pool = getPgPool();
+      const res = await pool.query(text, values);
+      return ((res.rows[0] as T) || null);
+    } catch (err) {
+      console.error("[PostgreSQL queryOne error, falling back to SQLite if available]", err);
+      if (!g.__tm_db) throw err;
+    }
+  }
+
+  const stmt = db().prepare(sql);
+  if (Array.isArray(params)) {
+    return ((stmt.get(...params) as T) || null);
+  } else if (params) {
+    return ((stmt.get(params) as T) || null);
+  }
+  return ((stmt.get() as T) || null);
+}
+
+/**
+ * Async execute for INSERT, UPDATE, DELETE.
+ * Executes on PostgreSQL if enabled, otherwise falls back to SQLite.
+ */
+export async function execute(
+  sql: string,
+  params?: unknown[] | Record<string, unknown>
+): Promise<{ rowCount: number }> {
+  if (isPostgresEnabled()) {
+    try {
+      const { text, values } = toPgSql(sql, params);
+      const pool = getPgPool();
+      const res = await pool.query(text, values);
+      return { rowCount: res.rowCount ?? 0 };
+    } catch (err) {
+      console.error("[PostgreSQL execute error, falling back to SQLite if available]", err);
+      if (!g.__tm_db) throw err;
+    }
+  }
+
+  const stmt = db().prepare(sql);
+  let res: Database.RunResult;
+  if (Array.isArray(params)) {
+    res = stmt.run(...params);
+  } else if (params) {
+    res = stmt.run(params);
+  } else {
+    res = stmt.run();
+  }
+  return { rowCount: res.changes };
+}
 
 function init(): Database.Database {
   const dir = path.join(process.cwd(), "data");
@@ -33,8 +197,6 @@ function init(): Database.Database {
       kind          TEXT NOT NULL,
       public_url    TEXT NOT NULL DEFAULT '',
       cadence_hours INTEGER NOT NULL DEFAULT 48,
-      -- Collection clearance. See core/collection.ts: an uncleared programme
-      -- cannot run, and a cleared one with no recorded authority cannot either.
       cleared       INTEGER NOT NULL DEFAULT 0,
       authority     TEXT NOT NULL DEFAULT '',
       method        TEXT NOT NULL DEFAULT '',
@@ -43,8 +205,6 @@ function init(): Database.Database {
       created_at    TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    -- The programme's own condition ladder, as JSON rungs. Stored per programme
-    -- because it IS per programme — that is the whole point of core/condition.
     CREATE TABLE IF NOT EXISTS ladders (
       program_id TEXT PRIMARY KEY,
       rungs      TEXT NOT NULL DEFAULT '[]'
@@ -60,14 +220,12 @@ function init(): Database.Database {
       aliases       TEXT NOT NULL DEFAULT '[]'
     );
 
-    -- APPEND ONLY. Confirmations are kept: dropping them would make a flat
-    -- price indistinguishable from an unpolled one.
     CREATE TABLE IF NOT EXISTS observations (
       id              INTEGER PRIMARY KEY AUTOINCREMENT,
       program_id      TEXT NOT NULL,
       device_id       TEXT NOT NULL,
       condition_label TEXT NOT NULL,
-      amount_minor    INTEGER,              -- NULL = delisted, NOT zero
+      amount_minor    INTEGER,
       currency        TEXT NOT NULL DEFAULT '',
       observed_at     TEXT NOT NULL,
       run_id          TEXT NOT NULL DEFAULT '',
@@ -76,7 +234,6 @@ function init(): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_obs_key ON observations(program_id, device_id, condition_label, observed_at);
     CREATE INDEX IF NOT EXISTS idx_obs_device ON observations(device_id, observed_at);
 
-    -- What the device SELLS for, per channel. The other half of every spread.
     CREATE TABLE IF NOT EXISTS market_prices (
       id             INTEGER PRIMARY KEY AUTOINCREMENT,
       device_id      TEXT NOT NULL,
@@ -95,40 +252,26 @@ function init(): Database.Database {
     );
     CREATE INDEX IF NOT EXISTS idx_mp ON market_prices(device_id, market, channel, observed_at);
 
-    -- Rates are stored per DATE, never "latest", so a historical conversion is
-    -- reproducible instead of being re-derived at today's rate.
     CREATE TABLE IF NOT EXISTS fx_rates (
       base   TEXT NOT NULL,
       quote  TEXT NOT NULL,
       rate   REAL NOT NULL,
       as_of  TEXT NOT NULL,
-      -- WHERE THE RATE CAME FROM. A currency rate is a source like any other,
-      -- and an unattributed one is how a 13% error hides: the seeded rate here
-      -- was 84.09 INR/USD while the real mid-market was 95.35, so every USD
-      -- figure derived from it was wrong by that much and looked fine.
       source TEXT NOT NULL DEFAULT '',
       PRIMARY KEY (base, quote, as_of)
     );
 
-    -- Who entered a hand-typed price, and on whose authority.
-    --
-    -- Manual entry is a first-class collector (core/collection.ts), so its
-    -- output needs the same provenance an automated one would carry. Without
-    -- entered_by and source, a disputed number six weeks from now is
-    -- unattributable — and a price nobody will stand behind is not evidence.
     CREATE TABLE IF NOT EXISTS entries (
       id           INTEGER PRIMARY KEY AUTOINCREMENT,
-      kind         TEXT NOT NULL,              -- market_price | quote
-      ref_id       INTEGER,                    -- row created in the target table
+      kind         TEXT NOT NULL,
+      ref_id       INTEGER,
       entered_by   TEXT NOT NULL DEFAULT '',
-      week         TEXT NOT NULL DEFAULT '',   -- ISO week the figure is FOR
+      week         TEXT NOT NULL DEFAULT '',
       note         TEXT NOT NULL DEFAULT '',
       created_at   TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_entries ON entries(kind, created_at);
 
-    -- OAuth 2.0 clients (client_credentials grant). Only the secret HASH is
-    -- stored; access tokens are signed, never persisted — see core/oauth.ts.
     CREATE TABLE IF NOT EXISTS oauth_clients (
       client_id    TEXT PRIMARY KEY,
       name         TEXT NOT NULL DEFAULT '',
@@ -140,7 +283,6 @@ function init(): Database.Database {
       revoked_at   TEXT
     );
 
-    -- API keys. Only the SHA-256 is stored — see core/apikey.ts.
     CREATE TABLE IF NOT EXISTS api_keys (
       id          TEXT PRIMARY KEY,
       name        TEXT NOT NULL DEFAULT '',
@@ -167,9 +309,6 @@ function init(): Database.Database {
     );
     CREATE INDEX IF NOT EXISTS idx_runs ON runs(program_id, started_at);
 
-    -- The catalogue's to-do list. Rows here are NOT failures of the scraper;
-    -- they are prices we refused to guess at, kept whole so a human can fix the
-    -- catalogue and replay them.
     CREATE TABLE IF NOT EXISTS quarantine (
       id           INTEGER PRIMARY KEY AUTOINCREMENT,
       program_id   TEXT NOT NULL,
@@ -192,14 +331,6 @@ function init(): Database.Database {
   return db;
 }
 
-/**
- * Columns added after a table first shipped.
- *
- * `CREATE TABLE IF NOT EXISTS` is a no-op on an existing table, so every column
- * added later is invisible to a database that already exists — and the symptom
- * is every page 500ing at once, which is exactly how this was found. New
- * columns go here as well as in the CREATE above.
- */
 function migrate(db: Database.Database) {
   const need: Array<[string, string, string]> = [
     ["market_prices", "entered_by", "ALTER TABLE market_prices ADD COLUMN entered_by TEXT NOT NULL DEFAULT ''"],
@@ -214,11 +345,6 @@ function migrate(db: Database.Database) {
     );
     if (!cols.has(column)) db.exec(stmt);
   }
-  /* Indexes on migrated columns belong HERE, after the ALTERs.
-     Putting this in the CREATE block meant it ran before the migration, so on
-     any database created before the column existed the index referenced a
-     missing column and the entire schema exec threw — every page 500ing on a
-     schema change that had otherwise been handled correctly. */
   db.exec("CREATE INDEX IF NOT EXISTS idx_mp_week ON market_prices(device_id, market, channel, week)");
 }
 

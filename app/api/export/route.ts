@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticate } from "@/lib/apiAuth.ts";
-import { db } from "@/lib/db.ts";
+import { query, queryOne, j } from "@/lib/db.ts";
 import { seed } from "@/lib/seed.ts";
 import { fxRates, rateInForce } from "@/lib/repo.ts";
 import { buildRows, toCsv, exportSummary, type ExportInput } from "@/core/export.ts";
 import { money } from "@/core/money.ts";
 import { skuLabel } from "@/core/search.ts";
 import { mapCondition, describeSpan, type LadderRung } from "@/core/condition.ts";
-import { j } from "@/lib/db.ts";
 
 export const dynamic = "force-dynamic";
 
@@ -37,7 +36,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "name a program or a market" }, { status: 400 });
   }
 
-  const rows = db().prepare(
+  const rows = await query<Record<string, unknown>>(
     `SELECT o.program_id, p.name AS program_name, p.market,
             o.device_id, d.brand, d.model, d.ram_gb, d.storage_gb,
             o.condition_label, o.amount_minor, o.currency, o.observed_at, o.run_id
@@ -48,25 +47,28 @@ export async function GET(req: NextRequest) {
         ${program ? "AND o.program_id = @program" : ""}
         ${market ? "AND p.market = @market" : ""}
       ORDER BY d.brand, d.model, d.storage_gb, o.condition_label
-      LIMIT @limit`
-  ).all({ program, market, limit }) as Array<Record<string, unknown>>;
+      LIMIT @limit`,
+    { program, market, limit }
+  );
 
   // Ladders are per programme; look each up once rather than per row.
   const ladders = new Map<string, LadderRung[]>();
-  const ladderFor = (id: string) => {
+  const ladderFor = async (id: string) => {
     if (!ladders.has(id)) {
-      const r = db().prepare("SELECT rungs FROM ladders WHERE program_id=?").get(id) as { rungs?: string } | undefined;
+      const r = await queryOne<{ rungs?: string }>("SELECT rungs FROM ladders WHERE program_id=?", [id]);
       ladders.set(id, j<LadderRung[]>(String(r?.rungs || "[]"), []));
     }
     return ladders.get(id)!;
   };
 
-  const items: ExportInput[] = rows.map((r) => {
+  const items: ExportInput[] = [];
+  for (const r of rows) {
     const pid = String(r.program_id);
-    const span = mapCondition({ programId: pid, rungs: ladderFor(pid) }, String(r.condition_label));
+    const ladder = await ladderFor(pid);
+    const span = mapCondition({ programId: pid, rungs: ladder }, String(r.condition_label));
     const storageGb = Number(r.storage_gb);
     const ramGb = r.ram_gb === null || r.ram_gb === undefined ? undefined : Number(r.ram_gb);
-    return {
+    items.push({
       programId: pid,
       programName: String(r.program_name),
       market: String(r.market),
@@ -81,8 +83,8 @@ export async function GET(req: NextRequest) {
       observedAt: String(r.observed_at),
       week: "",
       source: String(r.run_id),
-    };
-  });
+    });
+  }
 
   const built = buildRows(items, fxRates());
 
@@ -90,7 +92,6 @@ export async function GET(req: NextRequest) {
     const currencies = [...new Set(built.map((b) => b.localCurrency))];
     return NextResponse.json({
       summary: exportSummary(built),
-      // The FX provenance, once, rather than repeated on 17,906 rows.
       rateSources: currencies
         .filter((c) => c !== "USD")
         .map((c) => rateInForce("USD", c, built[0]?.observedAt || new Date().toISOString()))
