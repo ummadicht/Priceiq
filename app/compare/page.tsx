@@ -37,34 +37,27 @@ export default async function Compare({
   searchParams: Promise<{ device?: string; market?: string; channel?: string }>;
 }) {
   await requireSuperIQ("/priceiq/compare");
-  seed();
+  await seed();
   const sp = await searchParams;
-  /* Look the device up, never list them all.
-     Rendering 2,566 chips shipped 1.5 MB of markup so somebody could pick one. */
-  const devices = listDevices();
+  const devices = await listDevices();
+  const busiestDev = await busiestDeviceId();
   const deviceId = sp.device && devices.some((d) => d.id === sp.device)
     ? sp.device
-    // Landing on devices[0] meant landing alphabetically — out of 2,566, almost
-    // always on something with no data at all.
-    : (busiestDeviceId() ?? devices[0].id);
-  /* Default to a market that HAS data rather than a hardcoded "US".
-     With the example dataset purged, the US and UAE hold nothing, so the old
-     default opened on an empty screen for every device. */
+    : (busiestDev ?? (devices[0]?.id || ""));
+
+  const busiestMkt = await busiestMarket();
   const market = (sp.market && MARKETS[sp.market as MarketCode]
     ? sp.market
-    : (busiestMarket() ?? "US")) as MarketCode;
+    : (busiestMkt ?? "US")) as MarketCode;
   const channel = (sp.channel && CHANNELS.some((c) => c.id === sp.channel) ? sp.channel : "wholesale") as Channel;
 
-  const device = devices.find((d) => d.id === deviceId)!;
-  const r = compareDevice(deviceId, market, channel);
-  const cov = coverageFor(deviceId, market);
+  const device = devices.find((d) => d.id === deviceId) || devices[0] || { id: "", brand: "", model: "", storageGb: 0, releaseYear: 0, aliases: [] };
+  const r = await compareDevice(deviceId, market, channel);
+  const cov = await coverageFor(deviceId, market);
   const here = cov.quotes.find((q) => q.market === market);
-  /* A USD reference beside every local figure. Rupees are the truth of what an
-     Indian programme pays; dollars are what make it comparable to Dubai and the
-     US, and without one on the page everybody converts it themselves at
-     whatever rate their browser found. */
-  const rates = fxRates();
-  const usdRate = r.reportIn === "USD" ? null : rateInForce("USD", r.reportIn, new Date().toISOString());
+
+  const rates = await fxRates();
+  const usdRate = r.reportIn === "USD" ? null : await rateInForce("USD", r.reportIn, new Date().toISOString());
   const usd = (m: Parameters<typeof convert>[0], at: string) => {
     const c = convert(m, "USD", at, rates);
     return c.ok ? `$${(c.value.money.amountMinor / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : null;

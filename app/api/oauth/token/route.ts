@@ -28,7 +28,7 @@ function oauthError(error: string, description: string, status = 400) {
 }
 
 export async function POST(req: NextRequest) {
-  seed();
+  await seed();
 
   const signing = tokenSigningSecret();
   if (!signing) {
@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
     return oauthError("invalid_client", "send client_id and client_secret, by Basic auth or in the body", 401);
   }
 
-  const client = authenticateClient(clientId, clientSecret);
+  const client = await authenticateClient(clientId, clientSecret);
   if (!client) {
     // One message for unknown, revoked and wrong-secret alike — anything more
     // specific lets somebody enumerate valid client ids.

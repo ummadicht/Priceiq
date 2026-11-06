@@ -21,23 +21,23 @@ async function human(): Promise<string | null> {
 export async function GET() {
   const user = await human();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  seed();
-  return NextResponse.json({ clients: listClients() });
+  await seed();
+  return NextResponse.json({ clients: await listClients() });
 }
 
 export async function POST(req: NextRequest) {
   const user = await human();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  seed();
+  await seed();
 
   const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
-  if (b.revoke) return NextResponse.json({ revoked: revokeClient(String(b.revoke)) });
+  if (b.revoke) return NextResponse.json({ revoked: await revokeClient(String(b.revoke)) });
 
   const scopes = (Array.isArray(b.scopes) ? b.scopes : ["read"])
     .map(String).filter((s): s is Scope => (ALL_SCOPES as string[]).includes(s));
   if (!scopes.length) return NextResponse.json({ error: "pick at least one scope" }, { status: 400 });
 
-  const { client, clientSecret } = createClient(String(b.name || "unnamed"), scopes, user);
+  const { client, clientSecret } = await createClient(String(b.name || "unnamed"), scopes, user);
   return NextResponse.json({
     client,
     client_secret: clientSecret,

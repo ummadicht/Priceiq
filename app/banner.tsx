@@ -1,25 +1,14 @@
 import { provenance } from "@/lib/provenance.ts";
-import { db, queryOne } from "@/lib/db.ts";
+import { queryOne } from "@/lib/db.ts";
 
 /**
  * Shown on every screen that displays a number.
- *
- * It used to warn that real and invented prices were mixed. That warning is
- * gone because the mixing is gone — the example dataset has been purged rather
- * than explained. A disclaimer is a poor substitute for not having the problem.
- *
- * What remains is the gap that IS real: plenty of trade-in prices, almost no
- * market prices, so most comparisons have only one side.
+ * Connects directly to PostgreSQL 'price_iq' schema.
  */
 export default async function SeedBanner() {
-  const p = provenance();
-  let sell = 0;
-  try {
-    const row = await queryOne<{ c: number }>("SELECT count(*) c FROM market_prices");
-    sell = Number(row?.c || 0);
-  } catch {
-    sell = (db().prepare("SELECT count(*) c FROM market_prices").get() as { c: number }).c;
-  }
+  const p = await provenance();
+  const row = await queryOne<{ c: number }>("SELECT count(*) c FROM market_prices");
+  const sell = Number(row?.c || 0);
 
   if (p.realObservations === 0) {
     return (

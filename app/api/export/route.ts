@@ -11,20 +11,12 @@ import { mapCondition, describeSpan, type LadderRung } from "@/core/condition.ts
 export const dynamic = "force-dynamic";
 
 /**
- * Export a programme's prices, in local currency AND USD.
- *
- *   GET ?program=exchange-in                CSV (a file)
- *   GET ?program=exchange-in&format=json    JSON, with a summary
- *   GET ?market=IN                          every programme in a market
- *
- * Both currencies always, with the rate and its date on every row — see
- * core/export.ts for why. The response also names the FX source, because a USD
- * column built on an unattributed rate is the kind of number people forward.
+ * Export a programme's prices from PostgreSQL, in local currency AND USD.
  */
 export async function GET(req: NextRequest) {
   const auth = await authenticate(req, "read");
   if (!auth.ok) return NextResponse.json({ error: auth.why }, { status: auth.status });
-  seed();
+  await seed();
 
   const q = req.nextUrl.searchParams;
   const program = q.get("program");
@@ -36,6 +28,19 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "name a program or a market" }, { status: 400 });
   }
 
+  const params: unknown[] = [];
+  let where = "WHERE o.amount_minor IS NOT NULL";
+  if (program) {
+    params.push(program);
+    where += ` AND o.program_id = $${params.length}`;
+  }
+  if (market) {
+    params.push(market);
+    where += ` AND p.market = $${params.length}`;
+  }
+  params.push(limit);
+  const limitPlaceholder = `$${params.length}`;
+
   const rows = await query<Record<string, unknown>>(
     `SELECT o.program_id, p.name AS program_name, p.market,
             o.device_id, d.brand, d.model, d.ram_gb, d.storage_gb,
@@ -43,20 +48,17 @@ export async function GET(req: NextRequest) {
        FROM observations o
        JOIN programs p ON p.id = o.program_id
        JOIN devices  d ON d.id = o.device_id
-      WHERE o.amount_minor IS NOT NULL
-        ${program ? "AND o.program_id = @program" : ""}
-        ${market ? "AND p.market = @market" : ""}
+      ${where}
       ORDER BY d.brand, d.model, d.storage_gb, o.condition_label
-      LIMIT @limit`,
-    { program, market, limit }
+      LIMIT ${limitPlaceholder}`,
+    params
   );
 
-  // Ladders are per programme; look each up once rather than per row.
   const ladders = new Map<string, LadderRung[]>();
   const ladderFor = async (id: string) => {
     if (!ladders.has(id)) {
-      const r = await queryOne<{ rungs?: string }>("SELECT rungs FROM ladders WHERE program_id=?", [id]);
-      ladders.set(id, j<LadderRung[]>(String(r?.rungs || "[]"), []));
+      const r = await queryOne<{ rungs?: string }>("SELECT rungs FROM ladders WHERE program_id=$1", [id]);
+      ladders.set(id, j<LadderRung[]>(typeof r?.rungs === "string" ? r.rungs : JSON.stringify(r?.rungs || []), []));
     }
     return ladders.get(id)!;
   };
@@ -86,16 +88,20 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const built = buildRows(items, fxRates());
+  const rates = await fxRates();
+  const built = buildRows(items, rates);
 
   if (format === "json") {
     const currencies = [...new Set(built.map((b) => b.localCurrency))];
+    const rateSources = [];
+    for (const c of currencies.filter((cur) => cur !== "USD")) {
+      const rf = await rateInForce("USD", c, built[0]?.observedAt || new Date().toISOString());
+      if (rf) rateSources.push(rf);
+    }
+
     return NextResponse.json({
       summary: exportSummary(built),
-      rateSources: currencies
-        .filter((c) => c !== "USD")
-        .map((c) => rateInForce("USD", c, built[0]?.observedAt || new Date().toISOString()))
-        .filter(Boolean),
+      rateSources,
       rows: built,
     });
   }

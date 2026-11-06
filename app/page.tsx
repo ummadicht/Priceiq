@@ -10,10 +10,10 @@ export const dynamic = "force-dynamic";
 
 export default async function Overview() {
   await requireSuperIQ("/priceiq");
-  seed();
-  const programs = listPrograms();
-  const devices = listDevices();
-  const quarantined = quarantineCount();
+  await seed();
+  const programs = await listPrograms();
+  const devices = await listDevices();
+  const quarantined = await quarantineCount();
   const cleared = programs.filter((p) => p.cleared).length;
 
   return (

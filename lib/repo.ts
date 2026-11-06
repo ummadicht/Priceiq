@@ -1,4 +1,4 @@
-import { db, j } from "./db.ts";
+import { query, queryOne, execute, j } from "./db.ts";
 import { MARKETS, type MarketCode } from "../core/markets.ts";
 import { lastChangeAt, since, type Observation } from "../core/observation.ts";
 import { money, type FxRate, type Money } from "../core/money.ts";
@@ -7,13 +7,7 @@ import { computeSpread, summariseByChannel, type Spread } from "../core/spread.t
 import { CHANNELS, type Channel, type MarketPrice } from "../core/channel.ts";
 
 /**
- * The layer between storage and the domain.
- *
- * It does no arithmetic of its own. Every number a screen shows is computed by
- * core/ from rows read here — "last change", spreads, comparability, currency
- * conversion. Keeping the maths out of the query layer is what stops the
- * dashboard slowly growing a second, subtly different implementation of rules
- * that are already tested.
+ * The layer between PostgreSQL 'price_iq' storage and the domain.
  */
 
 export type ProgramRow = {
@@ -28,56 +22,52 @@ export type ProgramRow = {
   ladder: LadderRung[];
 };
 
-function obsRows(where: string, params: unknown[]): Observation[] {
-  return (
-    db().prepare(
-      `SELECT program_id, device_id, condition_label, amount_minor, currency, observed_at, run_id, source_url
-         FROM observations ${where} ORDER BY observed_at`
-    ).all(...(params as never[])) as Array<{
-      program_id: string; device_id: string; condition_label: string;
-      amount_minor: number | null; currency: string; observed_at: string;
-      run_id: string; source_url: string;
-    }>
-  ).map((r) => ({
-    programId: r.program_id, deviceId: r.device_id, conditionLabel: r.condition_label,
-    price: r.amount_minor === null ? null : money(r.amount_minor, r.currency),
-    observedAt: r.observed_at, runId: r.run_id, sourceUrl: r.source_url,
+async function obsRows(where: string, params: unknown[]): Promise<Observation[]> {
+  const rows = await query<{
+    program_id: string; device_id: string; condition_label: string;
+    amount_minor: number | null; currency: string; observed_at: string;
+    run_id: string; source_url: string;
+  }>(
+    `SELECT program_id, device_id, condition_label, amount_minor, currency, observed_at, run_id, source_url
+       FROM observations ${where} ORDER BY observed_at`,
+    params
+  );
+
+  return rows.map((r) => ({
+    programId: String(r.program_id), deviceId: String(r.device_id), conditionLabel: String(r.condition_label),
+    price: r.amount_minor === null ? null : money(Number(r.amount_minor), String(r.currency)),
+    observedAt: String(r.observed_at), runId: String(r.run_id), sourceUrl: String(r.source_url),
   }));
 }
 
-export function listPrograms(market?: MarketCode): ProgramRow[] {
-  const d = db();
-  const rows = (market
-    ? d.prepare("SELECT * FROM programs WHERE market=? ORDER BY name").all(market)
-    : d.prepare("SELECT * FROM programs ORDER BY market, name").all()) as Array<Record<string, unknown>>;
+export async function listPrograms(market?: MarketCode): Promise<ProgramRow[]> {
+  const rows = market
+    ? await query("SELECT * FROM programs WHERE market=$1 ORDER BY name", [market])
+    : await query("SELECT * FROM programs ORDER BY market, name");
 
-  return rows.map((p) => {
+  const programs: ProgramRow[] = [];
+  for (const p of rows) {
     const id = String(p.id);
-    const priceCount = (d.prepare("SELECT count(*) c FROM observations WHERE program_id=?").get(id) as { c: number }).c;
+    const priceCountRow = await queryOne<{ c: number }>("SELECT count(*) c FROM observations WHERE program_id=$1", [id]);
+    const priceCount = Number(priceCountRow?.c || 0);
 
-    /* "Last change" is DERIVED, never stored.
-     *
-     * A stored field drifts from the series the moment anything backfills or
-     * corrects an observation, and the drift is invisible. Deriving it means
-     * the column on screen and the data underneath cannot disagree — and the
-     * derivation is the tested one in core/observation, which knows that a
-     * re-poll at the same price is not a change. */
-    const perDevice = d.prepare("SELECT DISTINCT device_id FROM observations WHERE program_id=?").all(id) as Array<{ device_id: string }>;
+    const perDevice = await query<{ device_id: string }>("SELECT DISTINCT device_id FROM observations WHERE program_id=$1", [id]);
     let latest: string | null = null;
     for (const { device_id } of perDevice) {
-      const at = lastChangeAt(obsRows("WHERE program_id=? AND device_id=?", [id, device_id]));
+      const at = lastChangeAt(await obsRows("WHERE program_id=$1 AND device_id=$2", [id, device_id]));
       if (at && (!latest || at > latest)) latest = at;
     }
 
-    const run = d.prepare("SELECT * FROM runs WHERE program_id=? ORDER BY started_at DESC LIMIT 1").get(id) as
-      | Record<string, unknown> | undefined;
+    const run = await queryOne("SELECT * FROM runs WHERE program_id=$1 ORDER BY started_at DESC LIMIT 1", [id]);
 
     const cadence = Number(p.cadence_hours) || 48;
     const nextRunAt = run?.started_at
       ? new Date(Date.parse(String(run.started_at)) + cadence * 3600_000).toISOString()
       : null;
 
-    return {
+    const ladderRow = await queryOne<{ rungs?: string }>("SELECT rungs FROM ladders WHERE program_id=$1", [id]);
+
+    programs.push({
       id, name: String(p.name), market: String(p.market) as MarketCode, kind: String(p.kind),
       publicUrl: String(p.public_url || ""), cadenceHours: cadence,
       cleared: !!p.cleared, authority: String(p.authority || ""), enabled: !!p.enabled,
@@ -93,53 +83,59 @@ export function listPrograms(market?: MarketCode): ProgramRow[] {
           }
         : null,
       nextRunAt,
-      ladder: j<LadderRung[]>(String((d.prepare("SELECT rungs FROM ladders WHERE program_id=?").get(id) as { rungs?: string })?.rungs || "[]"), []),
-    };
-  });
+      ladder: j<LadderRung[]>(typeof ladderRow?.rungs === "string" ? ladderRow.rungs : JSON.stringify(ladderRow?.rungs || []), []),
+    });
+  }
+  return programs;
 }
 
 export type DeviceRow = { id: string; brand: string; model: string; storageGb: number; ramGb?: number; releaseYear: number; aliases: string[] };
 
-export function listDevices(): DeviceRow[] {
-  return (db().prepare("SELECT * FROM devices ORDER BY brand, release_year DESC, model, storage_gb").all() as Array<Record<string, unknown>>)
-    .map((r) => ({
-      id: String(r.id), brand: String(r.brand), model: String(r.model),
-      storageGb: Number(r.storage_gb),
-      ramGb: r.ram_gb === null || r.ram_gb === undefined ? undefined : Number(r.ram_gb),
-      releaseYear: Number(r.release_year),
-      aliases: j<string[]>(String(r.aliases || "[]"), []),
-    }));
+export async function listDevices(): Promise<DeviceRow[]> {
+  const rows = await query("SELECT * FROM devices ORDER BY brand, release_year DESC, model, storage_gb");
+  return rows.map((r) => ({
+    id: String(r.id), brand: String(r.brand), model: String(r.model),
+    storageGb: Number(r.storage_gb),
+    ramGb: r.ram_gb === null || r.ram_gb === undefined ? undefined : Number(r.ram_gb),
+    releaseYear: Number(r.release_year),
+    aliases: j<string[]>(typeof r.aliases === "string" ? r.aliases : JSON.stringify(r.aliases || []), []),
+  }));
 }
 
-export function fxRates(): FxRate[] {
-  return (db().prepare("SELECT base, quote, rate, as_of FROM fx_rates").all() as Array<Record<string, unknown>>)
-    .map((r) => ({ base: String(r.base), quote: String(r.quote), rate: Number(r.rate), asOf: String(r.as_of) }));
+export async function fxRates(): Promise<FxRate[]> {
+  const rows = await query("SELECT base, quote, rate, as_of FROM fx_rates");
+  return rows.map((r) => ({ base: String(r.base), quote: String(r.quote), rate: Number(r.rate), asOf: String(r.as_of) }));
 }
 
 export type RateRow = { base: string; quote: string; rate: number; asOf: string; source: string };
 
-/** The rate that would be used for a pair on a date, with its provenance. */
-export function rateInForce(base: string, quote: string, onDate: string): RateRow | null {
-  const r = db().prepare(
+/** The rate that would be used for a pair on a date, queried from PostgreSQL. */
+export async function rateInForce(base: string, quote: string, onDate: string): Promise<RateRow | null> {
+  const r = await queryOne(
     `SELECT base, quote, rate, as_of, source FROM fx_rates
-      WHERE base=? AND quote=?
-      ORDER BY abs(julianday(as_of) - julianday(?)) LIMIT 1`
-  ).get(base, quote, onDate.slice(0, 10)) as Record<string, unknown> | undefined;
+      WHERE base=$1 AND quote=$2
+      ORDER BY ABS(EXTRACT(EPOCH FROM as_of::timestamp) - EXTRACT(EPOCH FROM $3::timestamp)) LIMIT 1`,
+    [base, quote, onDate.slice(0, 10)]
+  );
   return r ? { base: String(r.base), quote: String(r.quote), rate: Number(r.rate),
                asOf: String(r.as_of), source: String(r.source || "") } : null;
 }
 
-/** Record a real rate. Overwrites whatever was there for that date. */
-export function setRate(base: string, quote: string, rate: number, asOf: string, source: string) {
-  db().prepare(
-    "INSERT OR REPLACE INTO fx_rates (base, quote, rate, as_of, source) VALUES (?,?,?,?,?)"
-  ).run(base.toUpperCase(), quote.toUpperCase(), rate, asOf.slice(0, 10), source);
+/** Record a real rate in PostgreSQL. Overwrites whatever was there for that date. */
+export async function setRate(base: string, quote: string, rate: number, asOf: string, source: string): Promise<void> {
+  await execute(
+    `INSERT INTO fx_rates (base, quote, rate, as_of, source) VALUES ($1,$2,$3,$4,$5)
+     ON CONFLICT (base, quote, as_of) DO UPDATE SET rate = EXCLUDED.rate, source = EXCLUDED.source`,
+    [base.toUpperCase(), quote.toUpperCase(), rate, asOf.slice(0, 10), source]
+  );
 }
 
-function marketPrices(deviceId: string, market: MarketCode): MarketPrice[] {
-  return (db().prepare(
-    "SELECT * FROM market_prices WHERE device_id=? AND market=? ORDER BY observed_at DESC"
-  ).all(deviceId, market) as Array<Record<string, unknown>>).map((r) => ({
+async function marketPrices(deviceId: string, market: MarketCode): Promise<MarketPrice[]> {
+  const rows = await query(
+    "SELECT * FROM market_prices WHERE device_id=$1 AND market=$2 ORDER BY observed_at DESC",
+    [deviceId, market]
+  );
+  return rows.map((r) => ({
     deviceId: String(r.device_id), market: String(r.market) as MarketCode,
     channel: String(r.channel) as Channel,
     condition: spanOf(String(r.cond_lo) as never, String(r.cond_hi) as never),
@@ -150,22 +146,20 @@ function marketPrices(deviceId: string, market: MarketCode): MarketPrice[] {
   }));
 }
 
-/** The latest quote from each programme in a market for one device. */
-function latestQuotes(deviceId: string, market: MarketCode) {
-  return db().prepare(
-    `SELECT o.program_id, p.name, o.condition_label, o.amount_minor, o.currency, o.observed_at
-       FROM observations o
-       JOIN programs p ON p.id = o.program_id
-      WHERE o.device_id = ? AND p.market = ? AND o.amount_minor IS NOT NULL
-        AND o.observed_at = (
-          SELECT MAX(o2.observed_at) FROM observations o2
-           WHERE o2.program_id = o.program_id AND o2.device_id = o.device_id
-        )
-      GROUP BY o.program_id`
-  ).all(deviceId, market) as Array<{
+/** The latest quote from each programme in a market for one device from PostgreSQL. */
+async function latestQuotes(deviceId: string, market: MarketCode) {
+  return await query<{
     program_id: string; name: string; condition_label: string;
     amount_minor: number; currency: string; observed_at: string;
-  }>;
+  }>(
+    `SELECT DISTINCT ON (o.program_id)
+            o.program_id, p.name, o.condition_label, o.amount_minor, o.currency, o.observed_at
+       FROM observations o
+       JOIN programs p ON p.id = o.program_id
+      WHERE o.device_id = $1 AND p.market = $2 AND o.amount_minor IS NOT NULL
+      ORDER BY o.program_id, o.observed_at DESC`,
+    [deviceId, market]
+  );
 }
 
 export type CompareRow = {
@@ -186,31 +180,24 @@ export type CompareResult = {
   marketPrice: MarketPrice | null;
 };
 
-/**
- * The comparison view: every programme's quote for one device, against the
- * market price for one channel.
- *
- * Rows that cannot be compared keep their refusal reason instead of vanishing.
- * A programme silently missing from a comparison table is indistinguishable
- * from a programme that does not quote the device, and those are very different
- * facts to a buyer.
- */
-export function compareDevice(deviceId: string, market: MarketCode, channel: Channel): CompareResult {
-  const rates = fxRates();
-  const prices = marketPrices(deviceId, market);
+export async function compareDevice(deviceId: string, market: MarketCode, channel: Channel): Promise<CompareResult> {
+  const rates = await fxRates();
+  const prices = await marketPrices(deviceId, market);
   const forChannel = prices.find((p) => p.channel === channel) ?? null;
   const reportIn = MARKETS[market].currency;
 
   const rows: CompareRow[] = [];
   const allSpreads: Spread[] = [];
 
-  for (const q of latestQuotes(deviceId, market)) {
+  const quotes = await latestQuotes(deviceId, market);
+  for (const q of quotes) {
+    const ladderRow = await queryOne<{ rungs?: string }>("SELECT rungs FROM ladders WHERE program_id=$1", [q.program_id]);
     const rungs = j<LadderRung[]>(
-      String((db().prepare("SELECT rungs FROM ladders WHERE program_id=?").get(q.program_id) as { rungs?: string })?.rungs || "[]"),
+      typeof ladderRow?.rungs === "string" ? ladderRow.rungs : JSON.stringify(ladderRow?.rungs || []),
       []
     );
     const span = mapCondition({ programId: q.program_id, rungs }, q.condition_label);
-    const quote = money(q.amount_minor, q.currency);
+    const quote = money(Number(q.amount_minor), q.currency);
 
     let spread: Spread | null = null;
     let refusal: string | null = null;
@@ -236,7 +223,6 @@ export function compareDevice(deviceId: string, market: MarketCode, channel: Cha
     });
   }
 
-  // Every channel, so the summary strip can show where the best exit is.
   const everyChannel: Spread[] = [];
   for (const mp of prices) {
     for (const row of rows) {
@@ -265,62 +251,51 @@ export function compareDevice(deviceId: string, market: MarketCode, channel: Cha
   };
 }
 
-export function quarantineCount(): number {
-  return (db().prepare("SELECT count(*) c FROM quarantine WHERE resolved_at IS NULL").get() as { c: number }).c;
+export async function quarantineCount(): Promise<number> {
+  const r = await queryOne<{ c: number }>("SELECT count(*) c FROM quarantine WHERE resolved_at IS NULL");
+  return Number(r?.c || 0);
 }
 
 export type Coverage = {
-  /** Quotes per market for this device: which markets actually have data. */
   quotes: Array<{ market: MarketCode; programs: number; quotes: number }>;
-  /** Channels with a market (sell-side) price in the given market. */
   channels: Channel[];
   totalQuotes: number;
 };
 
-/**
- * WHERE THIS DEVICE HAS DATA.
- *
- * A market-scoped comparison shows nothing when the device is not quoted in
- * that market — which is correct, and indistinguishable from a broken page.
- * "Empty because you are looking at the wrong market" and "empty because
- * nobody has this data" are very different facts and the screen owed the
- * reader both.
- */
-export function coverageFor(deviceId: string, market: MarketCode): Coverage {
-  const d = db();
-  const quotes = d.prepare(
+export async function coverageFor(deviceId: string, market: MarketCode): Promise<Coverage> {
+  const quotes = await query<{ market: MarketCode; programs: number; quotes: number }>(
     `SELECT p.market, count(DISTINCT o.program_id) programs, count(*) quotes
        FROM observations o JOIN programs p ON p.id = o.program_id
-      WHERE o.device_id = ? AND o.amount_minor IS NOT NULL
-      GROUP BY p.market ORDER BY quotes DESC`
-  ).all(deviceId) as Array<{ market: MarketCode; programs: number; quotes: number }>;
+      WHERE o.device_id = $1 AND o.amount_minor IS NOT NULL
+      GROUP BY p.market ORDER BY quotes DESC`,
+    [deviceId]
+  );
 
-  const channels = (d.prepare(
-    "SELECT DISTINCT channel FROM market_prices WHERE device_id = ? AND market = ?"
-  ).all(deviceId, market) as Array<{ channel: Channel }>).map((r) => r.channel);
+  const channelsRows = await query<{ channel: Channel }>(
+    "SELECT DISTINCT channel FROM market_prices WHERE device_id = $1 AND market = $2",
+    [deviceId, market]
+  );
+  const channels = channelsRows.map((r) => r.channel);
 
-  return { quotes, channels, totalQuotes: quotes.reduce((t, q) => t + q.quotes, 0) };
+  return {
+    quotes: quotes.map((q) => ({ market: q.market, programs: Number(q.programs), quotes: Number(q.quotes) })),
+    channels,
+    totalQuotes: quotes.reduce((t, q) => t + Number(q.quotes), 0),
+  };
 }
 
-/**
- * A sensible landing device — the one with the most quotes.
- *
- * `devices[0]` was alphabetical, which out of 2,566 devices meant the compare
- * page opened on something arbitrary that usually had no data at all.
- */
-export function busiestDeviceId(): string | null {
-  const r = db().prepare(
-    `SELECT device_id, count(*) n FROM observations
-      WHERE amount_minor IS NOT NULL GROUP BY device_id ORDER BY n DESC LIMIT 1`
-  ).get() as { device_id: string } | undefined;
+export async function busiestDeviceId(): Promise<string | null> {
+  const r = await queryOne<{ device_id: string }>(
+    `SELECT device_id FROM observations
+      WHERE amount_minor IS NOT NULL GROUP BY device_id ORDER BY count(*) DESC LIMIT 1`
+  );
   return r?.device_id ?? null;
 }
 
-/** The market holding the most observed prices — where the compare page opens. */
-export function busiestMarket(): MarketCode | null {
-  const r = db().prepare(
-    `SELECT p.market, count(*) n FROM observations o JOIN programs p ON p.id = o.program_id
-      WHERE o.amount_minor IS NOT NULL GROUP BY p.market ORDER BY n DESC LIMIT 1`
-  ).get() as { market: MarketCode } | undefined;
+export async function busiestMarket(): Promise<MarketCode | null> {
+  const r = await queryOne<{ market: MarketCode }>(
+    `SELECT p.market FROM observations o JOIN programs p ON p.id = o.program_id
+      WHERE o.amount_minor IS NOT NULL GROUP BY p.market ORDER BY count(*) DESC LIMIT 1`
+  );
   return r?.market ?? null;
 }

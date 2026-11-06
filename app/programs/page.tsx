@@ -10,10 +10,10 @@ export const dynamic = "force-dynamic";
 
 export default async function Programs({ searchParams }: { searchParams: Promise<{ market?: string }> }) {
   await requireSuperIQ("/priceiq/programs");
-  seed();
+  await seed();
   const sp = await searchParams;
   const market = (sp.market as MarketCode) || undefined;
-  const programs = listPrograms(market && MARKETS[market] ? market : undefined);
+  const programs = await listPrograms(market && MARKETS[market] ? market : undefined);
 
   return (
     <>
@@ -33,85 +33,77 @@ export default async function Programs({ searchParams }: { searchParams: Promise
         </div>
       </div>
 
-      <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {programs.map((p) => (
-          <div key={p.id} className="panel p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="truncate text-[14.5px] font-bold">{p.name}</div>
-                <div className="mono mt-0.5 text-[11px] text-[var(--muted)]">
-                  {p.id} · {p.kind} · every {p.cadenceHours}h
-                </div>
-              </div>
-              <span
-                className="mono shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide"
-                style={
-                  p.cleared
-                    ? { background: "var(--green-soft)", color: "var(--green-ink)" }
-                    : { background: "color-mix(in srgb, var(--yellow) 14%, transparent)", color: "var(--amber-ink)" }
-                }
-                title={p.cleared ? p.authority : "Not cleared for collection — no authority recorded"}
-              >
-                {p.cleared ? "cleared" : "gated"}
-              </span>
-            </div>
-
-            <div className="mt-3 grid grid-cols-3 gap-2 border-y border-[var(--border-soft)] py-2.5">
-              <Cell label="Observations" value={p.priceCount.toLocaleString()} />
-              <Cell label="Last change" value={p.lastChangeAgo} />
-              <Cell
-                label="Last run"
-                value={p.lastRun ? `${p.lastRun.captured}/${p.lastRun.errors}` : "—"}
-                sub={p.lastRun?.quarantined ? `${p.lastRun.quarantined} unmatched` : undefined}
-              />
-            </div>
-
-            <div className="mt-2.5">
-              <div className="label">Condition ladder</div>
-              <div className="mt-1.5 flex flex-wrap gap-1">
-                {p.ladder.map((r) => (
-                  <span
-                    key={r.label}
-                    className="border border-[var(--border)] px-1.5 py-0.5 text-[11px]"
-                    title={`maps to ${describeSpan(r.span)}`}
-                  >
-                    {r.label}
-                    <span className="ml-1 text-[var(--muted)]">{describeSpan(r.span)}</span>
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            {p.note && (
-              // Known collection difficulty, before anyone spends a day on it.
-              <p className="mt-2.5 border-l-2 pl-2 text-[11.5px] leading-snug text-[var(--muted)]"
-                 style={{ borderColor: "var(--gold-2)" }}>
-                {p.note}
-              </p>
-            )}
-
-            <div className="mt-3 flex items-center justify-between text-[12px]">
-              <a href={p.publicUrl} target="_blank" rel="noreferrer" className="font-semibold text-[var(--brand)]">
-                Public page ↗
-              </a>
-              <Link href={`/compare?market=${p.market}`} className="text-[var(--muted)]">
-                Compare in {MARKETS[p.market].name} →
-              </Link>
-            </div>
-          </div>
-        ))}
+      <div className="mt-6 overflow-hidden rounded-[8px] border border-[var(--border)] bg-[var(--card)]">
+        <table className="w-full text-left text-[13px]">
+          <thead className="border-b border-[var(--border)] bg-[var(--chip-bg)] text-[11px] uppercase tracking-wider text-[var(--muted)] font-mono">
+            <tr>
+              <th className="py-2.5 px-4">Programme</th>
+              <th className="py-2.5 px-4">Market</th>
+              <th className="py-2.5 px-4">Kind</th>
+              <th className="py-2.5 px-4">Ladder rungs</th>
+              <th className="py-2.5 px-4">Clearance</th>
+              <th className="py-2.5 px-4 text-right">Prices</th>
+              <th className="py-2.5 px-4">Last change</th>
+              <th className="py-2.5 px-4">Cadence</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[var(--border)]">
+            {programs.map((p) => {
+              const m = MARKETS[p.market];
+              return (
+                <tr key={p.id} className="hover:bg-[var(--chip-bg)]/40 transition-colors">
+                  <td className="py-3 px-4 font-semibold text-[var(--fg)]">
+                    {p.publicUrl ? (
+                      <a href={p.publicUrl} target="_blank" rel="noreferrer" className="hover:underline">
+                        {p.name} <span className="text-[10px] text-[var(--muted)]">↗</span>
+                      </a>
+                    ) : (
+                      p.name
+                    )}
+                    {p.note && <div className="text-[11px] text-[var(--muted)] font-normal">{p.note}</div>}
+                  </td>
+                  <td className="py-3 px-4 mono text-[12px]">
+                    <span className="font-bold">{p.market}</span> · {m.currency}
+                  </td>
+                  <td className="py-3 px-4 capitalize text-[var(--muted)]">{p.kind}</td>
+                  <td className="py-3 px-4">
+                    <div className="flex flex-wrap gap-1">
+                      {p.ladder.map((r) => (
+                        <span
+                          key={r.label}
+                          className="mono rounded-[3px] border border-[var(--border)] bg-[var(--chip-bg)] px-1.5 py-0.5 text-[10.5px]"
+                          title={describeSpan(r.span)}
+                        >
+                          {r.label}
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="py-3 px-4">
+                    {p.cleared ? (
+                      <span className="mono rounded-[3px] bg-[var(--green-soft)] px-1.5 py-0.5 text-[10.5px] font-semibold text-[var(--green-ink)]">
+                        CLEARED {p.authority && `· ${p.authority}`}
+                      </span>
+                    ) : (
+                      <span className="mono rounded-[3px] bg-[var(--yellow)]/30 px-1.5 py-0.5 text-[10.5px] font-semibold text-[var(--amber-ink)]">
+                        GATED · needs clearance
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-3 px-4 text-right mono font-semibold">{p.priceCount.toLocaleString()}</td>
+                  <td className="py-3 px-4 text-[12px] text-[var(--muted)]">
+                    {p.lastChangeAgo || "no changes yet"}
+                  </td>
+                  <td className="py-3 px-4 mono text-[11.5px] text-[var(--muted)]">
+                    every {p.cadenceHours}h
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </>
-  );
-}
-
-function Cell({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <div>
-      <div className="label">{label}</div>
-      <div className="mono mt-0.5 text-[13.5px] font-bold">{value}</div>
-      {sub && <div className="text-[10.5px]" style={{ color: "var(--amber-ink)" }}>{sub}</div>}
-    </div>
   );
 }
 
@@ -119,10 +111,11 @@ function Chip({ href, on, label }: { href: string; on: boolean; label: string })
   return (
     <Link
       href={href}
-      className="border px-2.5 py-1 text-[11.5px] font-semibold"
-      style={on
-        ? { borderColor: "var(--brand)", background: "var(--brand)", color: "#fff" }
-        : { borderColor: "var(--border)", color: "var(--muted)" }}
+      className={`rounded-[5px] px-3 py-1 text-[12.5px] font-medium transition-colors ${
+        on
+          ? "bg-[var(--fg)] text-[var(--bg)]"
+          : "border border-[var(--border)] bg-[var(--card)] text-[var(--muted)] hover:text-[var(--fg)]"
+      }`}
     >
       {label}
     </Link>

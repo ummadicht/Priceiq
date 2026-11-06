@@ -1,33 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticate } from "@/lib/apiAuth.ts";
 import { setRate, rateInForce } from "@/lib/repo.ts";
-import { db, query } from "@/lib/db.ts";
+import { query } from "@/lib/db.ts";
 import { seed } from "@/lib/seed.ts";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Exchange rates, with the source recorded.
- *
- *   GET  ?base=USD&quote=INR[&on=2026-08-25]   the rate that would be used
- *   GET  (no params)                            every rate held, newest first
- *   POST { base, quote, rate, asOf, source }    record a real one
- *
- * `source` is REQUIRED on write. A rate with no stated origin is how a 13%
- * error hides in plain sight: the seeded USD/INR here was 84.09 while the real
- * mid-market was 95.35, and every dollar figure built on it looked perfectly
- * reasonable.
+ * Exchange rates against PostgreSQL 'price_iq.fx_rates'.
  */
 export async function GET(req: NextRequest) {
   const auth = await authenticate(req, "read");
   if (!auth.ok) return NextResponse.json({ error: auth.why }, { status: auth.status });
-  seed();
+  await seed();
 
   const q = req.nextUrl.searchParams;
   const base = q.get("base"), quote = q.get("quote");
   if (base && quote) {
     return NextResponse.json({
-      rate: rateInForce(base.toUpperCase(), quote.toUpperCase(), q.get("on") || new Date().toISOString()),
+      rate: await rateInForce(base.toUpperCase(), quote.toUpperCase(), q.get("on") || new Date().toISOString()),
     });
   }
   const rows = await query<Record<string, unknown>>(
@@ -40,7 +31,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const auth = await authenticate(req, "write");
   if (!auth.ok) return NextResponse.json({ error: auth.why }, { status: auth.status });
-  seed();
+  await seed();
 
   const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
   const base = String(b.base || "").toUpperCase();
@@ -62,6 +53,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "say where the rate came from, e.g. 'xe.com mid-market'" }, { status: 400 });
   }
 
-  setRate(base, quote, rate, asOf, `${source} · recorded by ${auth.actor.label}`);
-  return NextResponse.json({ ok: true, rate: rateInForce(base, quote, asOf) });
+  await setRate(base, quote, rate, asOf, `${source} · recorded by ${auth.actor.label}`);
+  return NextResponse.json({ ok: true, rate: await rateInForce(base, quote, asOf) });
 }

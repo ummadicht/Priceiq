@@ -1,24 +1,9 @@
-import { db } from "./db.ts";
+import { query, execute } from "./db.ts";
 import { parseStorageGb, parseRamGb } from "../core/device.ts";
 
 /**
  * ENROLLING DEVICES FROM A SOURCE.
- *
- * A price list is also a device list. A 2,558-row exchange sheet names every
- * handset that programme quotes, in a consistent shape, which is far more
- * device knowledge than anyone will hand-type.
- *
- * But this is DELIBERATELY A SEPARATE STEP from importing prices, because
- * enrolling devices changes the identity space every future comparison resolves
- * against. Done as a side effect of a price import, one supplier's typos and
- * one supplier's naming conventions quietly become the canonical catalogue, and
- * a second source then fails to match the first. Enrolment is a decision.
- *
- * The shape this parses is "Brand Model (RAM/Storage)":
- *
- *     Apple iPhone 11 (4 GB/128 GB)      → Apple · iPhone 11 · 128GB
- *     Realme GT 7 Pro 5G (12 GB/256 GB)  → realme · GT 7 Pro 5G · 256GB
- *     Samsung Galaxy F70e 5G (4 GB/128 GB) → Samsung · Galaxy F70e 5G · 128GB
+ * Persists into PostgreSQL 'price_iq.devices'.
  */
 
 export type Derived = {
@@ -26,12 +11,10 @@ export type Derived = {
   brand: string;
   model: string;
   storageGb: number;
-  /** Present when the source declared it — see CanonicalDevice.ramGb. */
   ramGb?: number;
   id: string;
 };
 
-/** Canonical spelling for the brand tokens this source uses. */
 const BRAND_CANON: Record<string, string> = {
   apple: "Apple", samsung: "Samsung", google: "Google", xiaomi: "Xiaomi",
   redmi: "Xiaomi", mi: "Xiaomi", poco: "POCO", oppo: "OPPO", vivo: "Vivo",
@@ -44,13 +27,6 @@ const BRAND_CANON: Record<string, string> = {
 const slug = (s: string) =>
   s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 
-/**
- * Derive a canonical device from a source's model string.
- *
- * Returns null rather than guessing when the brand is unknown or no storage can
- * be read — an un-derivable row is reported, never enrolled as a device whose
- * identity nobody can reproduce.
- */
 export function derive(raw: string): Derived | null {
   const text = (raw || "").trim();
   if (!text) return null;
@@ -58,29 +34,24 @@ export function derive(raw: string): Derived | null {
   const storageGb = parseStorageGb(text);
   if (!storageGb) return null;
 
-  // Strip the "(4 GB/128 GB)" parenthetical — it is RAM and storage, and
-  // storage is already captured. Leaving it in would make the model name
-  // differ for every RAM variant of the same handset.
-  const withoutParens = text.replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
+  const ramGb = parseRamGb(text) ?? undefined;
 
-  const first = withoutParens.split(/\s+/)[0]?.toLowerCase() ?? "";
+  const first = text.split(/\s+/)[0]?.toLowerCase() || "";
   const brand = BRAND_CANON[first];
   if (!brand) return null;
 
-  // Model is what remains after the brand token. Apple's rows read
-  // "Apple iPhone 11", so dropping just the first token leaves "iPhone 11".
-  const model = withoutParens.split(/\s+/).slice(1).join(" ").trim();
-  if (!model) return null;
+  const clean = text
+    .replace(/\s*\([^)]*\)\s*/g, " ")
+    .replace(/\b(5G|4G|LTE)\b/gi, "")
+    .trim();
 
-  /* RAM GOES IN THE ID when the source declares it.
-   *
-   * Without it, an Honor 90 256GB at 8GB and at 12GB of RAM collapse to one
-   * device holding two different prices, and whichever imported last would
-   * silently win. In this source that is 370 real handsets. */
-  const ramGb = parseRamGb(text) ?? undefined;
-  const id = ramGb
-    ? `${slug(brand)}-${slug(model)}-${ramGb}-${storageGb}`
-    : `${slug(brand)}-${slug(model)}-${storageGb}`;
+  const brandPat = new RegExp(`^${brand}\\s*`, "i");
+  const model = clean.replace(brandPat, "").trim() || clean;
+
+  const parts = [slug(brand), slug(model)];
+  if (ramGb) parts.push(`${ramGb}gb`);
+  parts.push(`${storageGb}gb`);
+  const id = parts.join("-");
 
   return { raw: text, brand, model, storageGb, ramGb, id };
 }
@@ -93,17 +64,11 @@ export type EnrolReport = {
   skipped: Array<{ raw: string; why: string }>;
 };
 
-/** Add any device in `models` that the catalogue does not already hold. */
-export function enrolDevices(models: string[], opts: { commit: boolean }): EnrolReport {
-  const d = db();
-  const have = new Set(
-    (d.prepare("SELECT id FROM devices").all() as Array<{ id: string }>).map((r) => r.id)
-  );
+/** Add any device in `models` that the catalogue does not already hold in PostgreSQL. */
+export async function enrolDevices(models: string[], opts: { commit: boolean }): Promise<EnrolReport> {
+  const rows = await query<{ id: string }>("SELECT id FROM devices");
+  const have = new Set(rows.map((r) => r.id));
   const report: EnrolReport = { seen: models.length, derived: 0, added: 0, existing: 0, skipped: [] };
-
-  const ins = d.prepare(
-    "INSERT OR IGNORE INTO devices (id, brand, model, storage_gb, ram_gb, release_year, aliases) VALUES (?,?,?,?,?,?,?)"
-  );
   const staged = new Map<string, Derived>();
 
   for (const raw of models) {
@@ -122,13 +87,14 @@ export function enrolDevices(models: string[], opts: { commit: boolean }): Enrol
   report.added = staged.size;
 
   if (opts.commit) {
-    d.transaction(() => {
-      for (const dev of staged.values()) {
-        // Release year is unknown from a price list. Zero rather than a guess:
-        // a fabricated year would look like fact on a device page.
-        ins.run(dev.id, dev.brand, dev.model, dev.storageGb, dev.ramGb ?? null, 0, "[]");
-      }
-    })();
+    for (const dev of staged.values()) {
+      await execute(
+        `INSERT INTO devices (id, brand, model, storage_gb, ram_gb, release_year, aliases)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT (id) DO NOTHING`,
+        [dev.id, dev.brand, dev.model, dev.storageGb, dev.ramGb ?? null, 0, "[]"]
+      );
+    }
   }
   return report;
 }

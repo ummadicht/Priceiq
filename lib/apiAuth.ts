@@ -23,12 +23,7 @@ export async function authenticate(req: NextRequest, needed: Scope): Promise<
 > {
   const authHeader = req.headers.get("authorization");
 
-  /* An OAuth access token, tried FIRST.
-   *
-   * Both credentials arrive as `Bearer …`, so the order matters: a token is
-   * distinguished by verifying, not by its shape, and checking it first means a
-   * bot's short-lived token never falls through to the static-key path and
-   * comes back as "not a valid API key". */
+  /* An OAuth access token, tried FIRST. */
   const bearer = /^Bearer\s+(\S+)$/i.exec((authHeader || "").trim())?.[1];
   if (bearer && !bearer.startsWith("pk_live_")) {
     const claims = verifyToken(bearer, tokenSigningSecret());
@@ -43,7 +38,7 @@ export async function authenticate(req: NextRequest, needed: Scope): Promise<
 
   const presented = keyFromHeader(authHeader);
   if (presented) {
-    const k = verifyKey(presented);
+    const k = await verifyKey(presented);
     if (!k) return { ok: false, status: 401, why: "that API key is not valid or has been revoked" };
     if (!permits(k.scopes, needed)) {
       return { ok: false, status: 403, why: `this key does not have "${needed}" scope` };

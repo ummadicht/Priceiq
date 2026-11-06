@@ -6,21 +6,6 @@ import { isoWeek } from "../core/week.ts";
 import { listDevices } from "./repo.ts";
 import { recordMarketPrice, validateEntry } from "./entry.ts";
 
-/**
- * BULK IMPORT — a spreadsheet becomes prices, or explains why it did not.
- *
- * This is the ingest gate again, wearing different clothes. A pasted sheet says
- * "iPhone 16 Pro Max 512GB", not "apple-iphone-16-pro-max-512", so every row
- * goes through the same device resolver that automated collection would use —
- * and obeys the same rule: MATCHED, AMBIGUOUS or UNRESOLVED, never a nearest
- * guess. A bulk import is exactly where guessing does the most damage, because
- * nobody reads forty rows they did not have to correct.
- *
- * DRY RUN FIRST, ALWAYS. The endpoint previews by default and only writes when
- * asked. An import is the one moment where a person can still see the whole
- * batch before it becomes data.
- */
-
 export type RowStatus = "ok" | "unresolved" | "ambiguous" | "invalid";
 
 export type ParsedRow = {
@@ -49,7 +34,6 @@ export type BulkReport = {
   missingColumns: string[];
   rows: ParsedRow[];
   counts: Record<RowStatus, number>;
-  /** True when nothing at all could be read — usually a header problem. */
   fatal: string | null;
 };
 
@@ -60,8 +44,8 @@ export type BulkDefaults = {
   source?: string;
 };
 
-/** Parse and resolve, without writing anything. */
-export function parseBulk(text: string, defaults: BulkDefaults = {}): BulkReport {
+/** Parse and resolve against PostgreSQL devices catalogue, without writing anything. */
+export async function parseBulk(text: string, defaults: BulkDefaults = {}): Promise<BulkReport> {
   const delimiter = sniffDelimiter(text);
   const rows = parseDelimited(text, delimiter);
   const counts: Record<RowStatus, number> = { ok: 0, unresolved: 0, ambiguous: 0, invalid: 0 };
@@ -83,7 +67,8 @@ export function parseBulk(text: string, defaults: BulkDefaults = {}): BulkReport
     };
   }
 
-  const catalogue: CanonicalDevice[] = listDevices().map((d) => ({
+  const rawDevices = await listDevices();
+  const catalogue: CanonicalDevice[] = rawDevices.map((d) => ({
     id: d.id, brand: d.brand, model: d.model, storageGb: d.storageGb,
     ramGb: d.ramGb, releaseYear: d.releaseYear, aliases: d.aliases,
   }));
@@ -112,8 +97,6 @@ export function parseBulk(text: string, defaults: BulkDefaults = {}): BulkReport
     const source = cell(r, "source") || defaults.source || "";
     const note = cell(r, "note");
 
-    // Device first: an unresolvable device makes every other field moot, and
-    // it is the failure a person most needs to see row by row.
     const res = resolveDevice(deviceText, catalogue);
     if (res.status === "unresolved") {
       out.push({ ...base, status: "unresolved", why: res.why });
@@ -157,7 +140,6 @@ export function parseBulk(text: string, defaults: BulkDefaults = {}): BulkReport
   return { delimiter, headers, unmappedColumns: map.unmapped, missingColumns: [], rows: out, counts, fatal: null };
 }
 
-/** Country names and codes people actually type. */
 function lookupMarket(raw: string): MarketCode | "" {
   const s = raw.toLowerCase().trim();
   if (!s) return "";
@@ -171,20 +153,13 @@ function lookupMarket(raw: string): MarketCode | "" {
 
 export type CommitResult = { written: number; skipped: number; failures: Array<{ line: number; why: string }> };
 
-/**
- * Write the rows a dry run marked `ok`.
- *
- * Non-ok rows are SKIPPED, never coerced. Losing forty good rows over three
- * typos would be its own kind of wrong, so the batch proceeds — and the report
- * says exactly which lines did not land, so nothing disappears silently.
- */
-export function commitBulk(report: BulkReport, enteredBy: string): CommitResult {
+export async function commitBulk(report: BulkReport, enteredBy: string): Promise<CommitResult> {
   const failures: Array<{ line: number; why: string }> = [];
   let written = 0, skipped = 0;
 
   for (const row of report.rows) {
     if (row.status !== "ok") { skipped++; continue; }
-    const r = recordMarketPrice({
+    const r = await recordMarketPrice({
       deviceId: row.deviceId!, market: row.market!, channel: row.channel!,
       amountMajor: row.amountMajor!, currency: row.currency!,
       sampleSize: row.sampleSize!, dispersionPct: row.scatter ?? null,

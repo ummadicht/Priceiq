@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 export default async function Entry() {
   await requireSuperIQ("/priceiq/entry");
-  seed();
+  await seed();
   const base = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
   return (

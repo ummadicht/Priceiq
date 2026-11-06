@@ -7,18 +7,10 @@ import SeedBanner from "../banner";
 
 export const dynamic = "force-dynamic";
 
-/**
- * The catalogue, by manufacturer.
- *
- * It used to render every device as a table row — 2,566 of them, 3 MB of
- * markup, and unusable the moment a real source landed. The full list is not
- * a useful artefact at this size; what people want is either "find this one"
- * or "what does this manufacturer have", and both are here.
- */
 export default async function Devices() {
   await requireSuperIQ("/priceiq/devices");
-  seed();
-  const devices = listDevices();
+  await seed();
+  const devices = await listDevices();
   const brands = brandsOf(devices);
   const base = process.env.NEXT_PUBLIC_BASE_PATH || "";
   const withRam = devices.filter((d) => d.ramGb !== undefined).length;
