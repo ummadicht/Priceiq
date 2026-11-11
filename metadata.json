@@ -1,0 +1,8 @@
+{
+  "name": "PriceIQ",
+  "description": "What trade-in programmes pay, what devices sell for by channel, and the spread between them. A SuperIQ engine.",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

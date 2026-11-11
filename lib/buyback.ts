@@ -80,24 +80,26 @@ export async function getBuybackPricesByGrade(deviceId?: string): Promise<Buybac
     params
   );
 
-  return rows.map((r) => {
-    const d = devMap.get(r.device_id);
-    const span = mapCondition(CASHIFY_INDIA_LADDER, r.condition_label);
-    const amountMinor = Number(r.amount_minor || 0);
-    return {
-      deviceId: r.device_id,
-      brand: d?.brand || "",
-      model: d?.model || "",
-      storageGb: d?.storageGb || 0,
-      conditionLabel: r.condition_label,
-      conditionSpan: span,
-      cashifyPriceMinor: amountMinor,
-      cashifyPriceMajor: amountMinor / 100,
-      currency: r.currency || "INR",
-      observedAt: r.observed_at,
-      sourceUrl: r.source_url,
-    };
-  });
+  return rows
+    .map((r) => {
+      const d = devMap.get(r.device_id);
+      const span = mapCondition(CASHIFY_INDIA_LADDER, r.condition_label);
+      const amountMinor = Number(r.amount_minor || 0);
+      return {
+        deviceId: r.device_id,
+        brand: d?.brand || "",
+        model: d?.model || "",
+        storageGb: d?.storageGb || 0,
+        conditionLabel: r.condition_label,
+        conditionSpan: span,
+        cashifyPriceMinor: amountMinor,
+        cashifyPriceMajor: amountMinor / 100,
+        currency: r.currency || "INR",
+        observedAt: r.observed_at,
+        sourceUrl: r.source_url,
+      };
+    })
+    .sort((a, b) => a.deviceId.localeCompare(b.deviceId) || b.cashifyPriceMinor - a.cashifyPriceMinor);
 }
 
 /**

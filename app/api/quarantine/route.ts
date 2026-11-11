@@ -113,6 +113,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    await seed();
     const summary = await ingestCashifyScraper({ force: true });
     const items = await fetchQuarantineItems(false);
     const devices = await listDevices();
@@ -187,6 +188,7 @@ export async function POST(req: NextRequest) {
       [quarantineId, rawDeviceText]
     );
 
+    await seed();
     const summary = await ingestCashifyScraper({ force: true });
     const items = await fetchQuarantineItems(false);
     const devices = await listDevices();

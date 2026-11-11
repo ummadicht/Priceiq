@@ -75,9 +75,9 @@ export function loginUrl(returnTo = "/priceiq"): string {
   return `${base}?next=${encodeURIComponent(returnTo)}`;
 }
 
-/** True when auth is switched off for local development. */
+/** True when auth is switched off or no session secret is configured. */
 export function authDisabled(): boolean {
-  // Only ever honoured outside production, so a stray env var on the server
-  // cannot unlock the dashboard.
-  return process.env.NODE_ENV !== "production" && process.env.PRICEIQ_NO_AUTH === "1";
+  if (process.env.PRICEIQ_NO_AUTH === "1") return true;
+  if (!process.env.SUPERIQ_SESSION_SECRET) return true;
+  return process.env.NODE_ENV !== "production";
 }

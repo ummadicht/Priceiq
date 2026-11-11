@@ -2,7 +2,7 @@ import { query, queryOne, execute, j } from "./db.ts";
 import { MARKETS, type MarketCode } from "../core/markets.ts";
 import { lastChangeAt, since, type Observation } from "../core/observation.ts";
 import { money, type FxRate, type Money } from "../core/money.ts";
-import { spanOf, type LadderRung, type ConditionSpan, mapCondition } from "../core/condition.ts";
+import { spanOf, type LadderRung, type ConditionSpan, mapCondition, comparability } from "../core/condition.ts";
 import { computeSpread, summariseByChannel, type Spread } from "../core/spread.ts";
 import { CHANNELS, type Channel, type MarketPrice } from "../core/channel.ts";
 
@@ -146,21 +146,30 @@ async function marketPrices(deviceId: string, market: MarketCode): Promise<Marke
   }));
 }
 
-/** The latest quote from each programme in a market for one device from PostgreSQL. */
+/** The latest quote for each (programme, grade) in a market for one device. */
 async function latestQuotes(deviceId: string, market: MarketCode) {
   return await query<{
     program_id: string; name: string; condition_label: string;
     amount_minor: number; currency: string; observed_at: string;
   }>(
-    `SELECT DISTINCT ON (o.program_id)
+    `SELECT DISTINCT ON (o.program_id, o.condition_label)
             o.program_id, p.name, o.condition_label, o.amount_minor, o.currency, o.observed_at
        FROM observations o
        JOIN programs p ON p.id = o.program_id
       WHERE o.device_id = $1 AND p.market = $2 AND o.amount_minor IS NOT NULL
-      ORDER BY o.program_id, o.observed_at DESC`,
+      ORDER BY o.program_id, o.condition_label, o.observed_at DESC`,
     [deviceId, market]
   );
 }
+
+export type CompareGradeQuote = {
+  conditionLabel: string;
+  conditionSpan: ConditionSpan | null;
+  quote: Money;
+  observedAt: string;
+  spread: Spread | null;
+  refusal: string | null;
+};
 
 export type CompareRow = {
   programId: string; programName: string;
@@ -168,6 +177,7 @@ export type CompareRow = {
   observedAt: string;
   spread: Spread | null;
   refusal: string | null;
+  grades: CompareGradeQuote[];
 };
 
 export type CompareResult = {
@@ -185,54 +195,121 @@ export async function compareDevice(deviceId: string, market: MarketCode, channe
   const prices = await marketPrices(deviceId, market);
   const forChannel = prices.find((p) => p.channel === channel) ?? null;
   const reportIn = MARKETS[market].currency;
+  const targetSpan = forChannel?.condition ?? spanOf("flawless", "good");
 
   const rows: CompareRow[] = [];
   const allSpreads: Spread[] = [];
 
   const quotes = await latestQuotes(deviceId, market);
+  const byProgram = new Map<string, typeof quotes>();
   for (const q of quotes) {
-    const ladderRow = await queryOne<{ rungs?: string }>("SELECT rungs FROM ladders WHERE program_id=$1", [q.program_id]);
+    const list = byProgram.get(q.program_id) || [];
+    list.push(q);
+    byProgram.set(q.program_id, list);
+  }
+
+  for (const [programId, progQuotes] of byProgram.entries()) {
+    const programName = progQuotes[0].name;
+    const ladderRow = await queryOne<{ rungs?: string }>("SELECT rungs FROM ladders WHERE program_id=$1", [programId]);
     const rungs = j<LadderRung[]>(
       typeof ladderRow?.rungs === "string" ? ladderRow.rungs : JSON.stringify(ladderRow?.rungs || []),
       []
     );
-    const span = mapCondition({ programId: q.program_id, rungs }, q.condition_label);
-    const quote = money(Number(q.amount_minor), q.currency);
 
-    let spread: Spread | null = null;
-    let refusal: string | null = null;
+    const evaluatedGrades: Array<CompareGradeQuote & { cmpScore: number }> = progQuotes.map((q) => {
+      const span = mapCondition({ programId, rungs }, q.condition_label);
+      const quote = money(Number(q.amount_minor), q.currency);
+      let spread: Spread | null = null;
+      let refusal: string | null = null;
+      let cmpScore = 0;
 
-    if (!span) {
-      refusal = `"${q.condition_label}" is not on this programme's ladder`;
-    } else if (!forChannel) {
-      refusal = `no ${channel} market price for this device in ${MARKETS[market].name}`;
-    } else {
-      const r = computeSpread({
-        programId: q.program_id, deviceId, market,
-        tradeIn: { price: quote, condition: span, observedAt: q.observed_at },
-        marketPrice: forChannel, reportIn, rates,
-      });
-      if (r.ok) { spread = r.spread; allSpreads.push(r.spread); }
-      else refusal = r.why;
+      if (!span) {
+        refusal = `"${q.condition_label}" is not on this programme's ladder`;
+      } else {
+        const cmp = comparability(span, targetSpan);
+        if (cmp === "exact") cmpScore = 3;
+        else if (cmp === "approximate") cmpScore = 2;
+        else cmpScore = 1;
+
+        if (!forChannel) {
+          refusal = `no ${channel} market price for this device in ${MARKETS[market].name}`;
+        } else {
+          const r = computeSpread({
+            programId, deviceId, market,
+            tradeIn: { price: quote, condition: span, observedAt: q.observed_at },
+            marketPrice: forChannel, reportIn, rates,
+          });
+          if (r.ok) spread = r.spread;
+          else refusal = r.why;
+        }
+      }
+
+      return {
+        conditionLabel: q.condition_label,
+        conditionSpan: span,
+        quote,
+        observedAt: q.observed_at,
+        spread,
+        refusal,
+        cmpScore,
+      };
+    });
+
+    // Sort candidate grades: exact span match first, then overlapping span, then highest quote
+    evaluatedGrades.sort((a, b) => {
+      if (a.spread && !b.spread) return -1;
+      if (!a.spread && b.spread) return 1;
+      if (a.spread && b.spread && a.spread.confidence !== b.spread.confidence) {
+        return a.spread.confidence === "firm" ? -1 : 1;
+      }
+      if (b.cmpScore !== a.cmpScore) return b.cmpScore - a.cmpScore;
+      return b.quote.amountMinor - a.quote.amountMinor;
+    });
+
+    const primary = evaluatedGrades[0];
+    if (primary.spread) {
+      allSpreads.push(primary.spread);
     }
 
     rows.push({
-      programId: q.program_id, programName: q.name, quote,
-      conditionLabel: q.condition_label, conditionSpan: span,
-      observedAt: q.observed_at, spread, refusal,
+      programId,
+      programName,
+      quote: primary.quote,
+      conditionLabel: primary.conditionLabel,
+      conditionSpan: primary.conditionSpan,
+      observedAt: primary.observedAt,
+      spread: primary.spread,
+      refusal: primary.refusal,
+      grades: evaluatedGrades
+        .slice()
+        .sort((a, b) => b.quote.amountMinor - a.quote.amountMinor)
+        .map(({ cmpScore: _c, ...rest }) => rest),
     });
   }
 
   const everyChannel: Spread[] = [];
   for (const mp of prices) {
     for (const row of rows) {
-      if (!row.conditionSpan) continue;
-      const r = computeSpread({
-        programId: row.programId, deviceId, market,
-        tradeIn: { price: row.quote, condition: row.conditionSpan, observedAt: row.observedAt },
-        marketPrice: mp, reportIn, rates,
-      });
-      if (r.ok) everyChannel.push(r.spread);
+      // Pick the best matching grade for this channel's market price condition
+      let bestForMp: Spread | null = null;
+      for (const g of row.grades) {
+        if (!g.conditionSpan) continue;
+        const r = computeSpread({
+          programId: row.programId, deviceId, market,
+          tradeIn: { price: g.quote, condition: g.conditionSpan, observedAt: g.observedAt },
+          marketPrice: mp, reportIn, rates,
+        });
+        if (r.ok) {
+          if (
+            !bestForMp ||
+            (r.spread.confidence === "firm" && bestForMp.confidence !== "firm") ||
+            (r.spread.confidence === bestForMp.confidence && r.spread.grossPct > bestForMp.grossPct)
+          ) {
+            bestForMp = r.spread;
+          }
+        }
+      }
+      if (bestForMp) everyChannel.push(bestForMp);
     }
   }
 
