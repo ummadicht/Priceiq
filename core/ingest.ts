@@ -33,6 +33,8 @@ export type ScrapedRow = {
   priceMajor: number | null;
   currency: string;
   sourceUrl: string;
+  /** Optional timestamp from the scraper record (e.g. scraped_at). */
+  observedAt?: string;
 };
 
 export type IngestContext = {
@@ -88,7 +90,7 @@ export function ingest(rows: ScrapedRow[], ctx: IngestContext): IngestResult {
   const park = (reason: QuarantineReason, why: string, row: ScrapedRow, candidateIds?: string[]) =>
     quarantined.push({
       reason, why, row, candidateIds,
-      programId: ctx.programId, runId: ctx.runId, observedAt: ctx.observedAt,
+      programId: ctx.programId, runId: ctx.runId, observedAt: row.observedAt || ctx.observedAt,
     });
 
   for (const row of rows) {
@@ -118,7 +120,7 @@ export function ingest(rows: ScrapedRow[], ctx: IngestContext): IngestResult {
       deviceId: resolved.device.id,
       conditionLabel: row.conditionText,
       price: priced.price,
-      observedAt: ctx.observedAt,
+      observedAt: row.observedAt || ctx.observedAt,
       runId: ctx.runId,
       sourceUrl: row.sourceUrl,
     });

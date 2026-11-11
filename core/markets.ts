@@ -118,7 +118,7 @@ export const PROGRAM_SEEDS: ProgramSeed[] = [
   { id: "oppo-in",       name: "OPPO Trade-In",         market: "IN", kind: "oem",         publicUrl: "https://www.oppo.com/in/",                  cadenceHours: 48, cleared: false },
   { id: "realme-in",     name: "realme Trade-In",       market: "IN", kind: "oem",         publicUrl: "https://www.realme.com/in/",                cadenceHours: 48, cleared: false },
 
-  { id: "cashify-in",    name: "Cashify India",         market: "IN", kind: "recycler",    publicUrl: "https://www.cashify.in/",                   cadenceHours: 24, cleared: false, note: "Quotes from a public flow; the most-referenced price in the market." },
+  { id: "cashify-in",    name: "Cashify India",         market: "IN", kind: "recycler",    publicUrl: "https://www.cashify.in/",                   cadenceHours: 24, cleared: true,  note: "Quotes from a public flow; the most-referenced price in the market. Automated weekly database feed (SUP-15)." },
   { id: "cashkr-in",     name: "Cashkr",                market: "IN", kind: "recycler",    publicUrl: "https://www.cashkr.com/",                   cadenceHours: 48, cleared: false },
   { id: "budli-in",      name: "Budli",                 market: "IN", kind: "recycler",    publicUrl: "https://www.budli.in/",                     cadenceHours: 48, cleared: false },
   { id: "instacash-in",  name: "InstaCash (MobiKwik)",  market: "IN", kind: "recycler",    publicUrl: "https://www.instacash.co.in/",              cadenceHours: 48, cleared: false },

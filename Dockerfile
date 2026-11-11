@@ -9,7 +9,7 @@ RUN npm ci
 RUN node -e 'const fs=require("fs"),f="node_modules/next/dist/compiled/@next/font/dist/google/loader.js";if(fs.existsSync(f))fs.writeFileSync(f,fs.readFileSync(f,"utf8").replace(".exec(googleFontFileUrl)[1]",".exec(googleFontFileUrl)?.[1]||\"woff2\""))'
 
 COPY . .
-ARG NEXT_PUBLIC_BASE_PATH=/priceiq
+ARG NEXT_PUBLIC_BASE_PATH=/apps/priceiq
 ENV NEXT_PUBLIC_BASE_PATH=${NEXT_PUBLIC_BASE_PATH}
 
 RUN bash run-tests.sh && NODE_OPTIONS=--max-old-space-size=2048 npm run build
@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=4300
-ENV NEXT_PUBLIC_BASE_PATH=/priceiq
+ENV NEXT_PUBLIC_BASE_PATH=/apps/priceiq
 
 RUN mkdir -p /app/data
 

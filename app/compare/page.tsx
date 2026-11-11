@@ -1,15 +1,14 @@
 import Link from "next/link";
 import { seed } from "@/lib/seed.ts";
 import { requireSuperIQ } from "@/lib/guard.ts";
-import { compareDevice, listDevices, coverageFor, busiestDeviceId, busiestMarket, rateInForce } from "@/lib/repo.ts";
-import { convert } from "@/core/money.ts";
-import { fxRates } from "@/lib/repo.ts";
+import { compareDevice, listDevices, coverageFor, busiestDeviceId, busiestMarket, rateInForce, fxRates } from "@/lib/repo.ts";
+import { getBuybackPricesByGrade } from "@/lib/buyback.ts";
+import { convert, formatMoney } from "@/core/money.ts";
 import { fullLabel, skuLabel } from "@/core/search.ts";
 import DevicePickerClient from "@/components/DevicePickerClient";
 import { MARKETS, type MarketCode } from "@/core/markets.ts";
 import { CHANNELS, CHANNEL_LABEL, type Channel } from "@/core/channel.ts";
-import { describeSpan } from "@/core/condition.ts";
-import { formatMoney } from "@/core/money.ts";
+import { describeSpan, type ConditionSpan } from "@/core/condition.ts";
 import { formatGross } from "@/core/spread.ts";
 import { since } from "@/core/observation.ts";
 import SeedBanner from "../banner";
@@ -48,13 +47,14 @@ export default async function Compare({
   const busiestMkt = await busiestMarket();
   const market = (sp.market && MARKETS[sp.market as MarketCode]
     ? sp.market
-    : (busiestMkt ?? "US")) as MarketCode;
+    : (busiestMkt ?? "IN")) as MarketCode;
   const channel = (sp.channel && CHANNELS.some((c) => c.id === sp.channel) ? sp.channel : "wholesale") as Channel;
 
   const device = devices.find((d) => d.id === deviceId) || devices[0] || { id: "", brand: "", model: "", storageGb: 0, releaseYear: 0, aliases: [] };
   const r = await compareDevice(deviceId, market, channel);
   const cov = await coverageFor(deviceId, market);
   const here = cov.quotes.find((q) => q.market === market);
+  const cashifyGrades = await getBuybackPricesByGrade(deviceId);
 
   const rates = await fxRates();
   const usdRate = r.reportIn === "USD" ? null : await rateInForce("USD", r.reportIn, new Date().toISOString());
@@ -76,6 +76,16 @@ export default async function Compare({
         What each programme pays in {MARKETS[market].name}, against what it sells for via{" "}
         {CHANNELS.find((c) => c.id === channel)!.label.toLowerCase()}.
       </p>
+      {device.aliases && device.aliases.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[12px] text-[var(--muted)]">
+          <span>Mapped catalogue aliases:</span>
+          {device.aliases.map((a) => (
+            <span key={a} className="mono px-1.5 py-0.5 text-[11px] border border-[var(--border)] bg-[var(--chip-bg)] rounded-[2px] text-[var(--text)]">
+              {a}
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* device: search or browse, never a wall of chips */}
       <div className="mt-5">
@@ -269,6 +279,61 @@ export default async function Compare({
           </tbody>
         </table>
       </div>
+
+      {/* Cashify India Buyback Prices by Grade (SUP-15 scraper.cashify_buy_prices breakdown) */}
+      {cashifyGrades.length > 0 && (
+        <div className="panel mt-6 overflow-x-auto p-4">
+          <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+            <div>
+              <div className="label">Cashify India · Buyback Prices by Grade (cashify_buy_prices)</div>
+              <div className="text-[14px] font-bold mt-0.5">
+                All Scraped Condition Grades for {device.brand} {device.model} {skuLabel(device)}
+              </div>
+            </div>
+            <span className="mono text-[11.5px] text-[var(--muted)]">
+              {cashifyGrades.length} grade quote{cashifyGrades.length === 1 ? "" : "s"} in PostgreSQL
+            </span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Scraped Condition Grade</th>
+                <th>Canonical Ladder Span</th>
+                <th style={{ textAlign: "right" }}>Cashify Buyback Quote</th>
+                <th style={{ textAlign: "right" }}>USD Equivalent</th>
+                <th>Observed</th>
+                <th>Source</th>
+              </tr>
+            </thead>
+            <tbody>
+              {cashifyGrades.map((g) => (
+                <tr key={g.conditionLabel}>
+                  <td className="font-semibold">{g.conditionLabel}</td>
+                  <td className="text-[12px] text-[var(--muted)]">
+                    {g.conditionSpan ? describeSpan(g.conditionSpan as ConditionSpan) : "—"}
+                  </td>
+                  <td className="mono font-bold" style={{ textAlign: "right", color: "var(--green-ink)" }}>
+                    {g.currency} {g.cashifyPriceMajor.toLocaleString()}
+                  </td>
+                  <td className="mono text-[12px] text-[var(--muted)]" style={{ textAlign: "right" }}>
+                    {usd({ amountMinor: g.cashifyPriceMinor, currency: g.currency }, g.observedAt) ?? "—"}
+                  </td>
+                  <td className="mono text-[11.5px] text-[var(--muted)]">{since(g.observedAt)} ago</td>
+                  <td className="text-[12px]">
+                    {g.sourceUrl ? (
+                      <a href={g.sourceUrl} target="_blank" rel="noreferrer" className="text-[var(--brand)] hover:underline">
+                        cashify.in ↗
+                      </a>
+                    ) : (
+                      <span className="text-[var(--muted)]">scraper.cashify_buy_prices</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* the USD reference, and where it came from */}
       {usdRate && r.rows.length > 0 && (

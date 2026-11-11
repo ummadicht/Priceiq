@@ -65,10 +65,16 @@ t("the currency pairs needed to compare these markets are declared", () => {
 });
 
 console.log("\nthe clearance gate");
-t("EVERY PROGRAMME SHIPS UNCLEARED", () => {
+t("EVERY PROGRAMME SHIPS UNCLEARED (except explicitly cleared feeds)", () => {
   // If this ever fails, someone has enabled collection without recording how
   // it is permitted. That is the failure this test exists to catch.
-  for (const p of PROGRAM_SEEDS) assert.equal(p.cleared, false, `${p.id} ships cleared`);
+  for (const p of PROGRAM_SEEDS) {
+    if (p.id === "cashify-in") {
+      assert.equal(p.cleared, true, "cashify-in is cleared via SUP-15 database bridge");
+    } else {
+      assert.equal(p.cleared, false, `${p.id} ships cleared`);
+    }
+  }
 });
 t("an uncleared programme is refused, with an actionable reason", () => {
   const p = PROGRAM_SEEDS[0];

@@ -24,6 +24,7 @@ const NAV = [
   { href: "/programs", label: "Programmes" },
   { href: "/devices", label: "Devices" },
   { href: "/compare", label: "Compare" },
+  { href: "/quarantine", label: "Quarantine" },
   { href: "/trends", label: "Week on week" },
   { href: "/entry", label: "Record price" },
 ];

@@ -16,12 +16,16 @@ export type Derived = {
 };
 
 const BRAND_CANON: Record<string, string> = {
-  apple: "Apple", samsung: "Samsung", google: "Google", xiaomi: "Xiaomi",
-  redmi: "Xiaomi", mi: "Xiaomi", poco: "POCO", oppo: "OPPO", vivo: "Vivo",
-  realme: "realme", oneplus: "OnePlus", iqoo: "iQOO", motorola: "Motorola",
-  moto: "Motorola", nokia: "Nokia", honor: "Honor", infinix: "Infinix",
-  tecno: "Tecno", nothing: "Nothing", asus: "Asus", lenovo: "Lenovo",
-  lg: "LG", huawei: "Huawei", sony: "Sony",
+  apple: "Apple", iphone: "Apple", ipad: "Apple",
+  samsung: "Samsung", galaxy: "Samsung",
+  google: "Google", pixel: "Google",
+  xiaomi: "Xiaomi", redmi: "Xiaomi", mi: "Xiaomi",
+  poco: "POCO", oppo: "OPPO", vivo: "Vivo",
+  realme: "realme", oneplus: "OnePlus", iqoo: "iQOO",
+  motorola: "Motorola", moto: "Motorola",
+  nokia: "Nokia", honor: "Honor", infinix: "Infinix",
+  tecno: "Tecno", nothing: "Nothing", asus: "Asus",
+  lenovo: "Lenovo", lg: "LG", huawei: "Huawei", sony: "Sony",
 };
 
 const slug = (s: string) =>
@@ -36,17 +40,35 @@ export function derive(raw: string): Derived | null {
 
   const ramGb = parseRamGb(text) ?? undefined;
 
-  const first = text.split(/\s+/)[0]?.toLowerCase() || "";
-  const brand = BRAND_CANON[first];
+  // Strip scraper prefix ("Cashify", "Grade A/B/C/D/E", "Flawless", "Good", etc.)
+  const stripped = text
+    .replace(/^cashify\s+/i, "")
+    .replace(/^(?:grade\s+[a-e][+-]?|flawless|good|fair|poor|broken|superb|excellent|average)\s+/i, "")
+    .trim();
+
+  const words = stripped.split(/\s+/);
+  let brand: string | undefined;
+  for (const w of words) {
+    const cleanW = w.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (BRAND_CANON[cleanW]) {
+      brand = BRAND_CANON[cleanW];
+      break;
+    }
+  }
   if (!brand) return null;
 
-  const clean = text
+  const clean = stripped
     .replace(/\s*\([^)]*\)\s*/g, " ")
-    .replace(/\b(5G|4G|LTE)\b/gi, "")
+    .replace(/\b\d+\s*gb\s*[/|]\s*\d+\s*(gb|tb)\b/gi, " ")
+    .replace(/\b\d+(?:\.\d+)?\s*(gb|tb)\b/gi, " ")
+    .replace(/\b(5G|4G|LTE|Unlocked|Dual\s+SIM|Refurbished)\b/gi, " ")
+    .replace(/\s+/g, " ")
     .trim();
 
   const brandPat = new RegExp(`^${brand}\\s*`, "i");
-  const model = clean.replace(brandPat, "").trim() || clean;
+  let model = clean.replace(brandPat, "").trim() || clean;
+  // Also strip trailing bare storage capacity if present
+  model = model.replace(new RegExp(`\\b${storageGb}$`), "").trim() || model;
 
   const parts = [slug(brand), slug(model)];
   if (ramGb) parts.push(`${ramGb}gb`);
@@ -88,11 +110,12 @@ export async function enrolDevices(models: string[], opts: { commit: boolean }):
 
   if (opts.commit) {
     for (const dev of staged.values()) {
+      const aliasList = dev.raw !== `${dev.brand} ${dev.model} ${dev.storageGb}GB` ? [dev.raw] : [];
       await execute(
         `INSERT INTO devices (id, brand, model, storage_gb, ram_gb, release_year, aliases)
          VALUES ($1,$2,$3,$4,$5,$6,$7)
          ON CONFLICT (id) DO NOTHING`,
-        [dev.id, dev.brand, dev.model, dev.storageGb, dev.ramGb ?? null, 0, "[]"]
+        [dev.id, dev.brand, dev.model, dev.storageGb, dev.ramGb ?? null, 2024, JSON.stringify(aliasList)]
       );
     }
   }

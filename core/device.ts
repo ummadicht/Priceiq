@@ -227,18 +227,20 @@ export function resolveDevice(listing: string, catalogue: CanonicalDevice[]): Re
   if (!tokens.length) return { status: "unresolved", why: "no usable tokens" };
 
   const storage = parseStorageGb(raw);
-  const brand = brandOf(tokens);
-  if (!brand) return { status: "unresolved", why: `no known brand in "${raw}"` };
-
   const tokenSet = new Set(tokens);
+  const rawLower = raw.toLowerCase();
+  const strippedLower = raw.replace(/^cashify\s+/i, "").trim().toLowerCase();
 
-  // An alias (model number) is a direct hit and outranks token scoring: a
-  // vendor that prints "A2849" has told us exactly which device it means.
+  // An alias (model number or operator-mapped quarantine string) is a direct
+  // hit and outranks token scoring: a vendor that prints "A2849" or an alias
+  // mapped from the Quarantine UI has told us exactly which device it means.
   for (const d of catalogue) {
     for (const a of d.aliases) {
-      const at = a.toLowerCase();
-      if (tokenSet.has(at) || raw.toLowerCase().includes(at)) {
-        if (storage !== null && d.storageGb !== storage) continue;
+      const at = a.toLowerCase().trim();
+      if (!at) continue;
+      const isExactMappedAlias = rawLower === at || strippedLower === at;
+      if (isExactMappedAlias || tokenSet.has(at) || rawLower.includes(at)) {
+        if (!isExactMappedAlias && storage !== null && d.storageGb !== storage) continue;
         return {
           status: "matched",
           device: d,
@@ -248,6 +250,9 @@ export function resolveDevice(listing: string, catalogue: CanonicalDevice[]): Re
       }
     }
   }
+
+  const brand = brandOf(tokens);
+  if (!brand) return { status: "unresolved", why: `no known brand in "${raw}"` };
 
   type Scored = { d: CanonicalDevice; covered: number };
   const fits: Scored[] = [];
